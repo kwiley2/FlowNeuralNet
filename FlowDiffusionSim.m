@@ -1,0 +1,327 @@
+% Simulate Flow + Diffusion dynamics
+
+%% Variable Initialization
+% Load in all necessary information from the flow network generation
+Network = load('SampleFlowNetwork');
+delta_x = Network.FlowNetwork.LatticeDeltaX;
+delta_y = Network.FlowNetwork.LatticeDeltaY;
+Diffusion_Lattice = Network.FlowNetwork.LatticeAdj;
+Flow_Lattice = Network.FlowNetwork.ConductanceNetwork;
+Current_Source = Network.FlowNetwork.CurrentSource;
+Current_Sinks = Network.FlowNetwork.CurrentSinks';
+Nodes_X = Network.FlowNetwork.X_positions;
+Nodes_Y = Network.FlowNetwork.Y_positions;
+N_nodes = size(Diffusion_Lattice,1);
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Free Simulation Parameters (Other parameters, such as the underlying
+% lattice structure and flow network details exist, but are altered in
+% the piece of code which generates the flow network)
+
+tsteps = 1024; % Number of steps
+dt = 1e-3; % Step Size
+
+% Amount of O2 that enters flow layer at source node per time step
+I_O2 = size(Current_Sinks,1)*100;
+
+% Diffusion Coefficients (if continuous)
+D_flow_to_diff = 50;
+D_diff = 50;
+D_diff_to_neural = 50;
+
+%Transition Probabilities (if discrete)
+%p_transfer = 0.5; % Probability to move from flow to diffusion layer
+%p_stay = 0.5; % Probability to stay still in diffusion layer
+%p_move = 1-p_stay; % Probability to move to new node in diffusion layer
+
+K = 1.7e-4; %Conversion between synaptic weights and currents
+N_neurons = 100;% number of neurons
+p = 0.9*1/sqrt(N_neurons); %probability of a given synapse existing
+rho = 1.4; % Needed to generate E-R neural net graph
+Mean_Resistance = 500; %resistances ~500 Ohms
+Var_Resistance = 100;
+Mean_Capacitance = 20e-6; %capacitances ~20uF
+Var_Capacitance = 3e-6;
+O2_need = 10; % Amount of O2 necessary to transition back into active state
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Generate Neural Adjacency Matrix
+A_neural = gen_adj(N_neurons, p, rho); %ER network
+A_neural(eye(size(A_neural,1))==1) = 0; %Delete self-loops
+A_neural = abs(A_neural);
+
+% Input and Output Current at each node (not currents along edges, just
+% what enters and leaves the system)
+I_sink_source = zeros(N_nodes,1);
+I_sink_source(Current_Source) = 1;
+I_sink_source(Current_Sinks(:)) = -1/size(Current_Sinks,1);
+
+% Find current flow through each edge given a steady-state flow
+% This may change if we later allow the neurons to modify flow from steady-
+% state, and this is why we designed the flow network as we did
+Edge_Currents = zeros(N_nodes);
+G = -Flow_Lattice + eye(N_nodes).*sum(Flow_Lattice,2);
+Voltages = pinv(G)*I_sink_source;
+for i=1:N_nodes
+    for j=1:N_nodes
+        Edge_Currents(i,j) = Flow_Lattice(i,j)*(Voltages(i)-Voltages(j));
+    end
+end
+Transition_matrix = Edge_Currents;
+Transition_matrix(Transition_matrix<0) = 0;
+Transition_matrix_sum = sum(Transition_matrix,2);
+Transition_matrix_sum(Transition_matrix_sum==0) = 1;
+% If we have a current sink, increase the denominator so that the
+% probability ISN'T 1, indicating current leaving the system.
+Transition_matrix_sum(Current_Sinks(:)) = Transition_matrix_sum(Current_Sinks(:)) + 1/size(Current_Sinks,1);
+for i=1:size(Transition_matrix,1)
+    for j=1:size(Transition_matrix,2)
+        Transition_matrix(i,j) = Transition_matrix(i,j)/Transition_matrix_sum(i);
+    end
+end
+
+% Generate transition probabilities for Diffusion Layer
+%Diffusion_Transition_Matrix = zeros(N_nodes,N_nodes);
+%deg = sum(Diffusion_Lattice,2);
+%if p_stay fixed for all nodes
+%Diffusion_Transition_Matrix = p_move*Diffusion_Lattice./deg + p_stay*eye(N_nodes,N_nodes);
+%if staying is just as likely as moving in any other direction
+%Diffusion_Transition_Matrix = (Diffusion_Lattice + eye(N_nodes,N_nodes))./(deg+1);
+        
+
+%Initialize O2 content of each node in the flow layer, as well as the
+%amount of O2 available for diffusion into the diffusion layer
+Node_O2_Flow = zeros(N_nodes,tsteps+1);
+Diffusion = zeros(size(Current_Sinks,1),tsteps+1);
+Node_O2_Flow(Current_Source) = I_O2;
+
+%Initialize the O2 content of each node in the Diffusion layer
+Node_O2_Diff = zeros(N_nodes,tsteps+1);
+
+%Initialize data variables for the neural layer
+Voltages = zeros(N_neurons,tsteps);
+Fire_mat = zeros([N_neurons,N_neurons,tsteps]);
+Voltage_thresh = normrnd(20e-3,1e-3,[N_neurons,1]);
+Fired = zeros(N_neurons,tsteps);
+Active = ones([N_neurons,tsteps]);
+O2 = zeros(N_neurons,tsteps);
+
+% Define variable electrical properties for each neuron (assuming normal
+% distribution)
+Capacitances = normrnd(Mean_Capacitance,Var_Capacitance,[N_neurons,1]);
+Resistances = normrnd(Mean_Resistance,Var_Resistance,[N_neurons,1]);
+
+% Decide which nodes in the diffusion layer each neuron will be connected
+% to
+Random_List = randperm(size(Diffusion_Lattice,1));
+Diff_to_Neural_Cxns = Random_List(1:N_neurons);
+
+%% Update loop
+%NOTE: There's something a bit weird about time sequencing here. Since
+%update_diff and update_neural both change the oxygen content in the
+%diffusion layer, we have to decide which happens first. As it is, first
+%the diffusion layer updates, then oxygen is pulled from the diffusion
+%layer. I don't think the order should matter much, but it's worth noting
+%in case I find later that it does matter.
+for i=1:tsteps
+    [Node_O2_Flow(:,i+1),Diffusion(:,i+1)] = update_flow(Node_O2_Flow(:,i),Transition_matrix,Current_Source,Current_Sinks,I_O2);
+    Node_O2_Diff(:,i+1) = update_diff(Node_O2_Diff(:,i),Diffusion_Lattice,Diffusion(:,i),Current_Sinks,dt,D_diff,D_flow_to_diff);
+    %Let the diffusion network get an O2 supply before turning on the
+    %neural layer
+    if(i > 200)
+        [Active(:,i), Fired(:,i), Voltages(:,i), O2(:,i),Node_O2_Diff(:,i+1)] = update_neural(Active(:,i-1), Fired(:,i-1), Voltages(:,i-1), O2(:,i-1), Resistances, Capacitances, A_neural, dt, K, 9e-5, Voltage_thresh,Node_O2_Diff(:,i+1),Diff_to_Neural_Cxns,D_diff_to_neural,O2_need);
+    end
+end
+
+%% Plotting
+figure(1);
+plot1 = imagesc(Node_O2_Diff);
+plot1(1,1).CData(Current_Sinks,1:5) = 255;
+%plot1(1,1).CData(deg<3,6:10) = 200;
+
+Diffusion_Graph = graph(Diffusion_Lattice);
+Diffusion_Graph.Nodes.Size = Node_O2_Diff(:,size(Node_O2_Diff,2));
+title('Diffusion O_2 Content vs. Time');
+xlabel('Time (ms)');
+ylabel('Node');
+colorbar;
+
+figure(2);
+plot2 = plot(Diffusion_Graph,'XData',Nodes_X,'YData',Nodes_Y);
+for i=1:N_nodes
+    highlight(plot2,i,'MarkerSize',10*Diffusion_Graph.Nodes.Size(i)/max(Diffusion_Graph.Nodes.Size));
+    for j=1:N_neurons
+        if(i==Random_List(j))
+            highlight(plot2,i,'NodeColor','g');
+        end
+    end
+end
+title('Diffusion Layer (Size = O_2 Content at end of Sim, Color = Cxn to Neuron)');
+
+figure(3);
+Flow_Graph = graph(Flow_Lattice);
+plot3 = plot(Flow_Graph,'XData',Nodes_X,'YData',Nodes_Y,'LineWidth',20*Flow_Graph.Edges.Weight/max(Flow_Graph.Edges.Weight));
+highlight(plot3,Current_Sinks,'NodeColor','r');
+title('Flow Layer (Edge Size = Conductivity, Green = Source, Red = Sink)');
+
+% Calculate Some Things for the Neural Layer plots
+% Net Activity of All Neurons
+Net_Activity = sum(Fired,1);
+% DFT of Net Activity (maybe has meaning, though looks like noise to me)
+y_net = fft(Net_Activity);
+f_net = (0:length(y_net)-1)*50/length(y_net);
+y_1 = fft(Fired(1,:));
+f_1 = (0:length(y_1)-1)*50/length(y_1);
+
+figure(4);
+imagesc(Fired);
+title('Action Potential History of Neurons (Dark Blue = Nothing, Yellow = Fired');
+xlabel('Time (ms)');
+ylabel('Neuron Label');
+
+figure(5);
+plot(Net_Activity);
+xlim([0 tsteps]);
+title('Net Activity of All Neurons vs. Time');
+xlabel('Time (ms)');
+ylabel('Number of Fired Action Potentials');
+
+
+figure(6);
+plot(f_net(2:floor(end/2)),abs(y_net(2:floor(end/2))));
+xlim([0 5]);
+title('DFT of Net Activity');
+xlabel('Frequency (Hz)');
+ylabel('Magnitude');
+
+set(1,'Position',[0,1000,600,300]);
+set(2,'Position',[300,127,300,300]);
+set(3,'Position',[0,128,300,300]);
+set(4,'Position',[600,1000,800,300]);
+set(5,'Position',[600,300,800,150]);
+set(6,'Position',[600,90,800,150]);
+
+
+
+
+function [Node_O2_next,diffusable_O2] = update_flow(Node_O2_current,Transition_matrix,Current_Source,Current_Sinks,I_O2)
+
+%Node_O2_next = zeros(size(Node_O2_current,1),1);
+Node_O2_next = Node_O2_current;
+%Discrete version
+%{
+diffusable_O2 = zeros(size(Current_Sinks,1),1);
+for i=1:size(Transition_matrix,1)
+    N_quanta = Node_O2_current(i);
+    p_vec = Transition_matrix(i,:);
+    p_vec = p_vec';
+    [O2_dist,diff] = dist_quanta(N_quanta,p_vec);
+    for j=1:size(Current_Sinks,1)
+        if(i==Current_Sinks(j))
+            diffusable_O2(j) = diff;
+        end
+    end
+    Node_O2_next = Node_O2_next + O2_dist;
+end
+Node_O2_next(Current_Source) = I_O2;
+%}
+
+%Continuous version
+for i=1:size(Current_Sinks,1)
+    if(Node_O2_next(Current_Sinks(i))>0)
+        Node_O2_next(Current_Sinks(i)) = Node_O2_next(Current_Sinks(i)) - I_O2/size(Current_Sinks,1);
+    end
+end
+Node_O2_next = (Transition_matrix')*Node_O2_next;
+Node_O2_next(Current_Source) = I_O2;
+diffusable_O2(:) = I_O2/size(Current_Sinks,1);
+
+end
+
+function Node_O2_next = update_diff(Node_O2_current,Diffusion_Lattice,Diffusable,Current_Sinks,dt,D_diff,D_transfer)
+
+%Node_O2_next = zeros(size(Node_O2_current,1),1);
+Node_O2_next = Node_O2_current;
+
+%Continuous Diffusion
+for i=1:size(Node_O2_current,1)
+    for j=1:i
+        if(Diffusion_Lattice(i,j) ~= 0)
+            Node_O2_next(i) = Node_O2_next(i) - D_diff*(Node_O2_current(i)-Node_O2_current(j))*dt;
+            Node_O2_next(j) = Node_O2_next(j) + D_diff*(Node_O2_current(i)-Node_O2_current(j))*dt;
+        end
+    end
+            
+    %if updating a sink node and diffusion layer has less O2 than the flow
+    %layer, then diffusion occurs from the flow layer to the diffusion
+    %layer
+    if(sum(Current_Sinks==i)>0)
+        if(Node_O2_current(i) < Diffusable(find(Current_Sinks==i)))
+            N_O2_transfer = D_transfer*(Diffusable(find(Current_Sinks==i))-Node_O2_current(i))*dt;
+            Node_O2_next(i) = Node_O2_next(i) + N_O2_transfer;
+        end
+    end
+end
+
+%Discrete Diffusion
+%{
+for i=1:size(Transition_matrix,1)
+    % Diffusion process
+    N_quanta = Node_O2_current(i);
+    p_vec = Transition_matrix(i,:);
+    p_vec = p_vec';
+    O2_dist = dist_quanta(N_quanta,p_vec);
+    % If we're updating a sink node, and the diffusion layer has less O2
+    % than the flow layer, then probabilistically distribute the difference
+    % to the diffusion layer.
+    if(sum(Current_Sinks==i)>0)
+        if(Node_O2_current(i) < Diffusable(find(Current_Sinks==i)))
+            N_transfer_quanta = Diffusable(find(Current_Sinks==i))-Node_O2_current(i);
+            rand_vec = rand(N_transfer_quanta,1);
+            transferred = sum(rand_vec < p_transfer);
+            Node_O2_next(i) = Node_O2_next(i) + transferred;
+        end
+    end    
+    
+    Node_O2_next = Node_O2_next + O2_dist;
+end
+%}
+
+end
+
+function [Active_next, Fired_next, Voltages_next, O2_next, Diff_O2_next] = update_neural(Active_current, Fired_current, Voltages_current, O2_current, Resistances, Capacitances, A_neural, dt, K, Noise_variance, Voltage_thresh,Node_O2_diff,Diff_to_Neural_Cxns,D_diff_to_neural,O2_need) 
+% This just preallocates size. The values change in a way that doesn't rely
+% on the current state, so the specific values here don't matter
+Voltages_next = Voltages_current;
+O2_next = O2_current;
+Active_next = Active_current;
+Fired_next = zeros(size(Fired_current,1),1);
+Diff_O2_next = Node_O2_diff;
+
+Fire_mat = eye(size(Fired_current,1)).*Fired_current;
+I_fire = K*Fire_mat*A_neural;
+N_neurons = size(Voltages_current,1);
+
+for j=1:N_neurons
+    Voltages_next(j) = Voltages_current(j) + (normrnd(0,Noise_variance)/Capacitances(j)-Voltages_current(j)/(Capacitances(j)*Resistances(j)))*dt + dt*sum(I_fire(:,j))/Capacitances(j);
+    if(O2_current(j) < 0)
+        % Pull oxygen diffusively from the connected node in the diffusion
+        % layer
+        O2_next(j) = O2_current(j) + D_diff_to_neural*Node_O2_diff(Diff_to_Neural_Cxns(j))*dt;
+        Diff_O2_next(Diff_to_Neural_Cxns(j)) = Diff_O2_next(Diff_to_Neural_Cxns(j)) - D_diff_to_neural*Node_O2_diff(Diff_to_Neural_Cxns(j))*dt;
+        if(O2_next(j) >= 0)
+            Active_next(j) = 1;
+        end
+        if(O2_next(j) < 0)
+            Active_next(j) = 0;
+        end
+    end
+    if(Voltages_next(j) > Voltage_thresh(j) && Active_next(j)==1)
+        Fired_next(j) = 1;
+        Voltages_next(j) = 0;
+        O2_next(j) = -O2_need;
+        Active_next(j) = 0;
+    end
+end
+end
