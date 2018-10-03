@@ -18,8 +18,8 @@ N_nodes = size(Diffusion_Lattice,1);
 % lattice structure and flow network details exist, but are altered in
 % the piece of code which generates the flow network)
 
-tsteps = 1024; % Number of steps
-dt = 1e-3; % Step Size
+tsteps = 2^14; % Number of steps
+dt = 1e-4; % Step Size
 
 % Amount of O2 that enters flow layer at source node per time step
 I_O2 = size(Current_Sinks,1)*100;
@@ -42,7 +42,10 @@ Mean_Resistance = 500; %resistances ~500 Ohms
 Var_Resistance = 100;
 Mean_Capacitance = 20e-6; %capacitances ~20uF
 Var_Capacitance = 3e-6;
-O2_need = 10; % Amount of O2 necessary to transition back into active state
+O2_consumption = 10; % Amount of O2 necessary to transition back into active state
+
+K_coupling = 5;
+O2_alpha = 0.2;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -50,6 +53,10 @@ O2_need = 10; % Amount of O2 necessary to transition back into active state
 A_neural = gen_adj(N_neurons, p, rho); %ER network
 A_neural(eye(size(A_neural,1))==1) = 0; %Delete self-loops
 A_neural = abs(A_neural);
+
+%Simplified Kuramoto model version
+A_neural = 0.5*(A_neural+A_neural');
+A_neural(A_neural~=0) = 1;
 
 % Input and Output Current at each node (not currents along edges, just
 % what enters and leaves the system)
@@ -101,6 +108,7 @@ Node_O2_Diff = zeros(N_nodes,tsteps+1);
 
 %Initialize data variables for the neural layer
 Voltages = zeros(N_neurons,tsteps);
+Phases = zeros(N_neurons,tsteps);
 Fire_mat = zeros([N_neurons,N_neurons,tsteps]);
 Voltage_thresh = normrnd(20e-3,1e-3,[N_neurons,1]);
 Fired = zeros(N_neurons,tsteps);
@@ -111,11 +119,19 @@ O2 = zeros(N_neurons,tsteps);
 % distribution)
 Capacitances = normrnd(Mean_Capacitance,Var_Capacitance,[N_neurons,1]);
 Resistances = normrnd(Mean_Resistance,Var_Resistance,[N_neurons,1]);
+Natural_Freqs = zeros(N_neurons,1);
+for i=1:N_neurons
+    Natural_Freqs(i) = 1/(Capacitances(i)*Resistances(i)); %doesn't really make sense as a frequency, but it does define a time scale, so sort of close
+end
 
 % Decide which nodes in the diffusion layer each neuron will be connected
 % to
 Random_List = randperm(size(Diffusion_Lattice,1));
-Diff_to_Neural_Cxns = Random_List(1:N_neurons);
+Adj_nd = zeros(N_neurons,size(Node_O2_Diff,1));
+for i=1:N_neurons
+    Adj_nd(i,Random_List(i)) = 1;
+end
+%Diff_to_Neural_Cxns = Random_List(1:N_neurons);
 
 %% Update loop
 %NOTE: There's something a bit weird about time sequencing here. Since
@@ -130,11 +146,21 @@ for i=1:tsteps
     %Let the diffusion network get an O2 supply before turning on the
     %neural layer
     if(i > 200)
-        [Active(:,i), Fired(:,i), Voltages(:,i), O2(:,i),Node_O2_Diff(:,i+1)] = update_neural(Active(:,i-1), Fired(:,i-1), Voltages(:,i-1), O2(:,i-1), Resistances, Capacitances, A_neural, dt, K, 9e-5, Voltage_thresh,Node_O2_Diff(:,i+1),Diff_to_Neural_Cxns,D_diff_to_neural,O2_need);
+        %[Active(:,i), Fired(:,i), Voltages(:,i), O2(:,i),Node_O2_Diff(:,i+1)] = update_neural_if(Active(:,i-1), Fired(:,i-1), Voltages(:,i-1), O2(:,i-1), Resistances, Capacitances, A_neural, dt, K, 9e-5, Voltage_thresh,Node_O2_Diff(:,i+1),Diff_to_Neural_Cxns,D_diff_to_neural,O2_need);
+        [Phases(:,i+1), O2(:,i+1), Node_O2_Diff(:,i+1)] = update_neural_kuramoto(Phases(:,i), O2(:,i), Natural_Freqs, A_neural, dt, K_coupling,Node_O2_Diff(:,i+1),Adj_nd,D_diff_to_neural,O2_consumption,O2_alpha);
     end
 end
 
 %% Plotting
+
+order_param = zeros(tsteps,1);
+for t=200:tsteps
+    for i=1:N_neurons
+        order_param(t) = order_param(t) + exp(1j*Phases(i,t));
+    end
+end
+order_param = abs(order_param)/N_neurons;
+%{
 figure(1);
 plot1 = imagesc(Node_O2_Diff);
 plot1(1,1).CData(Current_Sinks,1:5) = 255;
@@ -201,7 +227,7 @@ set(3,'Position',[0,128,300,300]);
 set(4,'Position',[600,1000,800,300]);
 set(5,'Position',[600,300,800,150]);
 set(6,'Position',[600,90,800,150]);
-
+%}
 
 
 
@@ -290,7 +316,7 @@ end
 
 end
 
-function [Active_next, Fired_next, Voltages_next, O2_next, Diff_O2_next] = update_neural(Active_current, Fired_current, Voltages_current, O2_current, Resistances, Capacitances, A_neural, dt, K, Noise_variance, Voltage_thresh,Node_O2_diff,Diff_to_Neural_Cxns,D_diff_to_neural,O2_need) 
+function [Active_next, Fired_next, Voltages_next, O2_next, Diff_O2_next] = update_neural_if(Active_current, Fired_current, Voltages_current, O2_current, Resistances, Capacitances, A_neural, dt, K, Noise_variance, Voltage_thresh,Node_O2_diff,Diff_to_Neural_Cxns,D_diff_to_neural,O2_need) 
 % This just preallocates size. The values change in a way that doesn't rely
 % on the current state, so the specific values here don't matter
 Voltages_next = Voltages_current;
@@ -323,5 +349,47 @@ for j=1:N_neurons
         O2_next(j) = -O2_need;
         Active_next(j) = 0;
     end
+end
+end
+
+function [Phase_next, O2_next, Diff_O2_next] = update_neural_kuramoto(Phase_current, O2_current, Natural_Freqs, A_neural, dt, K,Node_O2_diff,Adj_nd,D_nd,O2_consumption,O2_alpha)
+% This just preallocates size. The values change in a way that doesn't rely
+% on the current state, so the specific values here don't matter
+Phase_next = Phase_current;
+O2_next = O2_current;
+%Active_next = Active_current;
+%Fired_next = zeros(size(Fired_current,1),1);
+Diff_O2_next = Node_O2_diff;
+O2_rest = 0;
+alpha = O2_alpha;
+
+%Fire_mat = eye(size(Fired_current,1)).*Fired_current;
+N_neurons = size(Phase_current,1);
+Sin_matrix = zeros(N_neurons,N_neurons);
+for i=1:N_neurons
+    for j=1:N_neurons
+        Sin_matrix(i,j) = sin(Phase_current(i) - Phase_current(j));
+    end
+end
+Interaction_matrix = A_neural*Sin_matrix; %diagonal entries are the interaction terms in the Kuramoto model
+
+O2_diff_nd = zeros(N_neurons,size(Node_O2_diff,1));
+for j=1:N_neurons
+    for i=1:size(Node_O2_diff,1)
+        O2_diff_nd(i,j) = Node_O2_diff(i) - O2_current(j);
+    end
+end
+Interlayer_O2_matrix = Adj_nd*O2_diff_nd; %diagonal entries are the diffusion terms between layers
+
+for j=1:N_neurons
+    Fired = 0;
+    Phase_next(j) = Phase_current(j) + dt*(Natural_Freqs(j) + K*Interaction_matrix(j,j))*exp(-alpha*(O2_rest - O2_current(j)));
+    while(Phase_next(j) >= 2*pi)
+        Phase_next(j) = Phase_next(j) - 2*pi;
+        Fired = 1;
+    end
+    O2_next(j) = O2_current(j) + dt*(D_nd*Interlayer_O2_matrix(j,j)) - O2_consumption*Fired;
+    diffusion_node = find(Interlayer_O2_matrix(j,:)==1);
+    Diff_O2_next(diffusion_node) = Node_O2_diff(diffusion_node) - dt*(D_nd*Interlayer_O2_matrix(j,j));
 end
 end
