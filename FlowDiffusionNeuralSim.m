@@ -1,5 +1,7 @@
 % Simulate Flow + Diffusion dynamics
 
+function [avg_order_param] = FlowDiffusionNeuralSim(K_input)
+
 %% Variable Initialization
 % Load in all necessary information from the flow network generation
 Network = load('SampleFlowNetwork');
@@ -18,8 +20,8 @@ N_nodes = size(Diffusion_Lattice,1);
 % lattice structure and flow network details exist, but are altered in
 % the piece of code which generates the flow network)
 
-tsteps = 2^14; % Number of steps
-dt = 1e-4; % Step Size
+tsteps = 2^12; % Number of steps
+dt = 5e-4; % Step Size
 
 % Amount of O2 that enters flow layer at source node per time step
 I_O2 = size(Current_Sinks,1)*100;
@@ -44,7 +46,9 @@ Mean_Capacitance = 20e-6; %capacitances ~20uF
 Var_Capacitance = 3e-6;
 O2_consumption = 10; % Amount of O2 necessary to transition back into active state
 
-K_coupling = 5;
+%K_coupling = 5;
+class(K_input);
+K_coupling = K_input;
 O2_alpha = 0.2;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -160,6 +164,10 @@ for t=200:tsteps
     end
 end
 order_param = abs(order_param)/N_neurons;
+avg_order_param = mean(order_param((end-1000):end));
+K_coupling;
+avg_order_param;
+plot(order_param);
 %{
 figure(1);
 plot1 = imagesc(Node_O2_Diff);
@@ -230,6 +238,7 @@ set(6,'Position',[600,90,800,150]);
 %}
 
 
+end
 
 function [Node_O2_next,diffusable_O2] = update_flow(Node_O2_current,Transition_matrix,Current_Source,Current_Sinks,I_O2)
 
@@ -393,3 +402,4 @@ for j=1:N_neurons
     Diff_O2_next(diffusion_node) = Node_O2_diff(diffusion_node) - dt*(D_nd*Interlayer_O2_matrix(j,j));
 end
 end
+
