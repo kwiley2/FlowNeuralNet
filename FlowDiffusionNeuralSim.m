@@ -166,8 +166,8 @@ end
 order_param = abs(order_param)/N_neurons;
 avg_order_param = mean(order_param((end-1000):end));
 K_coupling;
-avg_order_param;
-plot(order_param);
+avg_order_param
+plot(order_param)
 %{
 figure(1);
 plot1 = imagesc(Node_O2_Diff);
@@ -374,32 +374,64 @@ alpha = O2_alpha;
 
 %Fire_mat = eye(size(Fired_current,1)).*Fired_current;
 N_neurons = size(Phase_current,1);
-Sin_matrix = zeros(N_neurons,N_neurons);
+%Sin_matrix = zeros(N_neurons,N_neurons);
+Phase_diff_mat = bsxfun(@minus,Phase_current,Phase_current');
+Sin_matrix = sin(Phase_diff_mat);
+%{
 for i=1:N_neurons
-    for j=1:N_neurons
+    for j=1:i
         Sin_matrix(i,j) = sin(Phase_current(i) - Phase_current(j));
     end
 end
-Interaction_matrix = A_neural*Sin_matrix; %diagonal entries are the interaction terms in the Kuramoto model
+Sin_matrix = Sin_matrix - Sin_matrix';
+%}
+Interaction_vec = diag(A_neural*Sin_matrix); %diagonal entries are the interaction terms in the Kuramoto model
 
-O2_diff_nd = zeros(N_neurons,size(Node_O2_diff,1));
+%O2_diff_nd = zeros(size(Node_O2_diff,1),N_neurons);
+O2_diff_nd = bsxfun(@minus,Node_O2_diff,O2_current');
+%{
 for j=1:N_neurons
     for i=1:size(Node_O2_diff,1)
         O2_diff_nd(i,j) = Node_O2_diff(i) - O2_current(j);
     end
 end
-Interlayer_O2_matrix = Adj_nd*O2_diff_nd; %diagonal entries are the diffusion terms between layers
+%}
+Interlayer_O2_vec = diag(Adj_nd*O2_diff_nd); %diagonal entries are the diffusion terms between layers
+%Interlayer_O2_vec = diag(Interlayer_O2_matrix); %put just the interesting bits in a vector
+
 
 for j=1:N_neurons
     Fired = 0;
-    Phase_next(j) = Phase_current(j) + dt*(Natural_Freqs(j) + K*Interaction_matrix(j,j))*exp(-alpha*(O2_rest - O2_current(j)));
+    %k1 = dt*dphase_dt(Natural_Freqs(j),K,Interaction_matrix(j,j),alpha,O2_rest,O2_current(j));
+    %implementing a Runge-Kutta method would be nice, but really difficult
+    %because of the complexity of the system of equations and because of
+    %the Dirac delta O2 change when the phase crosses 2pi
+    %Phase_next(j) = Phase_current(j) + dt*dphase_dt(Natural_Freqs(j),K,Interaction_vec(j),alpha,O2_rest,O2_current(j));
+    Fired = 0;
+    Phase_next(j) = Phase_current(j) + dt*(Natural_Freqs(j) + K*Interaction_vec(j))*exp(-alpha*(O2_rest - O2_current(j)));
     while(Phase_next(j) >= 2*pi)
         Phase_next(j) = Phase_next(j) - 2*pi;
         Fired = 1;
     end
-    O2_next(j) = O2_current(j) + dt*(D_nd*Interlayer_O2_matrix(j,j)) - O2_consumption*Fired;
-    diffusion_node = find(Interlayer_O2_matrix(j,:)==1);
-    Diff_O2_next(diffusion_node) = Node_O2_diff(diffusion_node) - dt*(D_nd*Interlayer_O2_matrix(j,j));
+    O2_next(j) = O2_current(j) + dt*(D_nd*Interlayer_O2_vec(j)) - O2_consumption*Fired;
+    diffusion_node = find(Adj_nd(j,:)==1);
+    Diff_O2_next(diffusion_node) = Node_O2_diff(diffusion_node) - dt*(D_nd*Interlayer_O2_vec(j));
 end
+
+%trying to implement the above for loop using matrix methods instead
+%{
+phi_dot = (Natural_Freqs + K*Interaction_vec).*arrayfun(@(x) exp(-alpha*(O2_rest-x)),O2_current);
+Phase_next = Phase_current + dt*phi_dot;
+Fired = Phase_next>(2*pi);
+Phase_next = arrayfun(@(x) mod(x,2*pi),Phase_next);
+O2_next = O2_current + dt*D_nd*Interlayer_O2_vec - O2_consumption*Fired;
+Diff_O2_next = Node_O2_diff - dt*D_nd*(Adj_nd'*Interlayer_O2_vec);
+%}
+
+
+end
+
+function [output] = dphase_dt(natural_freq, K, interaction,alpha,O2_rest,O2_current) 
+output = (natural_freq+K*interaction)*exp(-alpha*(O2_rest-O2_current));
 end
 
