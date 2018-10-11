@@ -20,8 +20,8 @@ N_nodes = size(Diffusion_Lattice,1);
 % lattice structure and flow network details exist, but are altered in
 % the piece of code which generates the flow network)
 
-tsteps = 2^12; % Number of steps
-dt = 5e-4; % Step Size
+tsteps = 2^14; % Number of steps
+dt = 1e-5; % Step Size
 
 % Amount of O2 that enters flow layer at source node per time step
 I_O2 = size(Current_Sinks,1)*100;
@@ -164,7 +164,7 @@ for t=200:tsteps
     end
 end
 order_param = abs(order_param)/N_neurons;
-avg_order_param = mean(order_param((end-1000):end));
+avg_order_param = mean(order_param((end-6000):end));
 K_coupling;
 avg_order_param
 plot(order_param)
@@ -278,16 +278,21 @@ function Node_O2_next = update_diff(Node_O2_current,Diffusion_Lattice,Diffusable
 
 %Node_O2_next = zeros(size(Node_O2_current,1),1);
 Node_O2_next = Node_O2_current;
+Node_O2_difference = bsxfun(@minus,Node_O2_current,Node_O2_current');
+Node_O2_transfer_vec = diag(Diffusion_Lattice*Node_O2_difference);
+Node_O2_next = Node_O2_current + dt*D_diff*Node_O2_transfer_vec;
 
 %Continuous Diffusion
 for i=1:size(Node_O2_current,1)
+    %{
     for j=1:i
         if(Diffusion_Lattice(i,j) ~= 0)
             Node_O2_next(i) = Node_O2_next(i) - D_diff*(Node_O2_current(i)-Node_O2_current(j))*dt;
             Node_O2_next(j) = Node_O2_next(j) + D_diff*(Node_O2_current(i)-Node_O2_current(j))*dt;
         end
     end
-            
+     %}
+    
     %if updating a sink node and diffusion layer has less O2 than the flow
     %layer, then diffusion occurs from the flow layer to the diffusion
     %layer
