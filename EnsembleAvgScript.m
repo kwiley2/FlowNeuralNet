@@ -4,7 +4,7 @@ n_couplings = 10;
 ensemble_avg_order_params = zeros(n_couplings,1);
 ensemble_std_dev_order_params = zeros(n_couplings,1);
 for j=1:n_couplings
-    K_coupling = j/2;
+    K_coupling = j/100;
 
     avg_order_param = zeros(n_trials,1);
     for i=1:n_trials

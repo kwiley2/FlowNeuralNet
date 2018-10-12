@@ -9,6 +9,7 @@ delta_x = Network.FlowNetwork.LatticeDeltaX;
 delta_y = Network.FlowNetwork.LatticeDeltaY;
 Diffusion_Lattice = Network.FlowNetwork.LatticeAdj;
 Flow_Lattice = Network.FlowNetwork.ConductanceNetwork;
+%Flow_Lattice = sparse(Flow_Lattice);
 Current_Source = Network.FlowNetwork.CurrentSource;
 Current_Sinks = Network.FlowNetwork.CurrentSinks';
 Nodes_X = Network.FlowNetwork.X_positions;
@@ -20,8 +21,8 @@ N_nodes = size(Diffusion_Lattice,1);
 % lattice structure and flow network details exist, but are altered in
 % the piece of code which generates the flow network)
 
-tsteps = 2^14; % Number of steps
-dt = 1e-5; % Step Size
+tsteps = 2^13; % Number of steps
+dt = 2e-5; % Step Size
 
 % Amount of O2 that enters flow layer at source node per time step
 I_O2 = size(Current_Sinks,1)*100;
@@ -44,12 +45,13 @@ Mean_Resistance = 500; %resistances ~500 Ohms
 Var_Resistance = 100;
 Mean_Capacitance = 20e-6; %capacitances ~20uF
 Var_Capacitance = 3e-6;
-O2_consumption = 10; % Amount of O2 necessary to transition back into active state
+O2_consumption = 1; % Amount of O2 necessary to transition back into active state
 
 %K_coupling = 5;
-class(K_input);
+%class(K_input);
 K_coupling = K_input;
-O2_alpha = 0.2;
+%K_coupling = 5;
+O2_alpha = 0;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -61,6 +63,7 @@ A_neural = abs(A_neural);
 %Simplified Kuramoto model version
 A_neural = 0.5*(A_neural+A_neural');
 A_neural(A_neural~=0) = 1;
+A_neural = sparse(A_neural);
 
 % Input and Output Current at each node (not currents along edges, just
 % what enters and leaves the system)
@@ -136,6 +139,9 @@ for i=1:N_neurons
     Adj_nd(i,Random_List(i)) = 1;
 end
 %Diff_to_Neural_Cxns = Random_List(1:N_neurons);
+Adj_nd = sparse(Adj_nd);
+Flow_Lattice = sparse(Flow_Lattice);
+Diffusion_Lattice = sparse(Diffusion_Lattice);
 
 %% Update loop
 %NOTE: There's something a bit weird about time sequencing here. Since
@@ -166,10 +172,12 @@ end
 order_param = abs(order_param)/N_neurons;
 avg_order_param = mean(order_param((end-6000):end));
 K_coupling;
-avg_order_param
-plot(order_param)
+avg_order_param;
 %{
 figure(1);
+plot(order_param)
+
+figure(2);
 plot1 = imagesc(Node_O2_Diff);
 plot1(1,1).CData(Current_Sinks,1:5) = 255;
 %plot1(1,1).CData(deg<3,6:10) = 200;
@@ -181,7 +189,7 @@ xlabel('Time (ms)');
 ylabel('Node');
 colorbar;
 
-figure(2);
+figure(3);
 plot2 = plot(Diffusion_Graph,'XData',Nodes_X,'YData',Nodes_Y);
 for i=1:N_nodes
     highlight(plot2,i,'MarkerSize',10*Diffusion_Graph.Nodes.Size(i)/max(Diffusion_Graph.Nodes.Size));
@@ -192,13 +200,14 @@ for i=1:N_nodes
     end
 end
 title('Diffusion Layer (Size = O_2 Content at end of Sim, Color = Cxn to Neuron)');
-
-figure(3);
+%{
+figure(4);
 Flow_Graph = graph(Flow_Lattice);
 plot3 = plot(Flow_Graph,'XData',Nodes_X,'YData',Nodes_Y,'LineWidth',20*Flow_Graph.Edges.Weight/max(Flow_Graph.Edges.Weight));
 highlight(plot3,Current_Sinks,'NodeColor','r');
 title('Flow Layer (Edge Size = Conductivity, Green = Source, Red = Sink)');
-
+%}
+%{
 % Calculate Some Things for the Neural Layer plots
 % Net Activity of All Neurons
 Net_Activity = sum(Fired,1);
@@ -228,16 +237,16 @@ xlim([0 5]);
 title('DFT of Net Activity');
 xlabel('Frequency (Hz)');
 ylabel('Magnitude');
-
+%}
 set(1,'Position',[0,1000,600,300]);
 set(2,'Position',[300,127,300,300]);
 set(3,'Position',[0,128,300,300]);
-set(4,'Position',[600,1000,800,300]);
+%set(4,'Position',[600,1000,800,300]);
+%{
 set(5,'Position',[600,300,800,150]);
 set(6,'Position',[600,90,800,150]);
 %}
-
-
+%}
 end
 
 function [Node_O2_next,diffusable_O2] = update_flow(Node_O2_current,Transition_matrix,Current_Source,Current_Sinks,I_O2)
@@ -278,11 +287,19 @@ function Node_O2_next = update_diff(Node_O2_current,Diffusion_Lattice,Diffusable
 
 %Node_O2_next = zeros(size(Node_O2_current,1),1);
 Node_O2_next = Node_O2_current;
-Node_O2_difference = bsxfun(@minus,Node_O2_current,Node_O2_current');
-Node_O2_transfer_vec = diag(Diffusion_Lattice*Node_O2_difference);
+Node_O2_difference = Node_O2_current-Node_O2_current';
+%Node_O2_transfer_vec = diag(Diffusion_Lattice*Node_O2_difference);
+Node_O2_transfer_vec = sum(Diffusion_Lattice'.*Node_O2_difference,1)';
 Node_O2_next = Node_O2_current + dt*D_diff*Node_O2_transfer_vec;
 
+Diffusable_vec = zeros(size(Node_O2_current,1),1);
+Diffusable_vec(Current_Sinks) = Diffusable;
+
+diffuse = Node_O2_current < Diffusable_vec;
+Node_O2_next = Node_O2_next + dt*D_transfer*(Diffusable_vec - Node_O2_current).*diffuse;
+
 %Continuous Diffusion
+%{
 for i=1:size(Node_O2_current,1)
     %{
     for j=1:i
@@ -295,6 +312,8 @@ for i=1:size(Node_O2_current,1)
     
     %if updating a sink node and diffusion layer has less O2 than the flow
     %layer, then diffusion occurs from the flow layer to the diffusion
+    %% 
+    %% 
     %layer
     if(sum(Current_Sinks==i)>0)
         if(Node_O2_current(i) < Diffusable(find(Current_Sinks==i)))
@@ -303,6 +322,7 @@ for i=1:size(Node_O2_current,1)
         end
     end
 end
+%}
 
 %Discrete Diffusion
 %{
@@ -380,8 +400,9 @@ alpha = O2_alpha;
 %Fire_mat = eye(size(Fired_current,1)).*Fired_current;
 N_neurons = size(Phase_current,1);
 %Sin_matrix = zeros(N_neurons,N_neurons);
-Phase_diff_mat = bsxfun(@minus,Phase_current,Phase_current');
-Sin_matrix = sin(Phase_diff_mat);
+%Phase_diff_mat = Phase_current-Phase_current';
+Sin_matrix = sin(Phase_current-Phase_current');
+%Sin_matrix = bsxfun(@(x,y) sin(x-y),Phase_current,Phase_current');
 %{
 for i=1:N_neurons
     for j=1:i
@@ -390,10 +411,11 @@ for i=1:N_neurons
 end
 Sin_matrix = Sin_matrix - Sin_matrix';
 %}
-Interaction_vec = diag(A_neural*Sin_matrix); %diagonal entries are the interaction terms in the Kuramoto model
+%Interaction_vec = diag(A_neural*Sin_matrix); %diagonal entries are the interaction terms in the Kuramoto model
+Interaction_vec = sum(A_neural'.*Sin_matrix,1)';
 
 %O2_diff_nd = zeros(size(Node_O2_diff,1),N_neurons);
-O2_diff_nd = bsxfun(@minus,Node_O2_diff,O2_current');
+O2_diff_nd = Node_O2_diff-O2_current';
 %{
 for j=1:N_neurons
     for i=1:size(Node_O2_diff,1)
@@ -401,10 +423,17 @@ for j=1:N_neurons
     end
 end
 %}
-Interlayer_O2_vec = diag(Adj_nd*O2_diff_nd); %diagonal entries are the diffusion terms between layers
+%Interlayer_O2_vec = diag(Adj_nd*O2_diff_nd); %diagonal entries are the diffusion terms between layers
+%Adj_nd_temp = sparse(Adj_nd);
+%[~,Adj_screen] = ind2sub(size(Adj_nd),find(Adj_nd))
+
+%Interlayer_O2_vec = O2_diff_nd(:,Adj_nd_screen);
+
+%Interlayer_O2_vec = Interlayer_O2_vec';
+Interlayer_O2_vec = sum(Adj_nd'.*O2_diff_nd,1)';
 %Interlayer_O2_vec = diag(Interlayer_O2_matrix); %put just the interesting bits in a vector
 
-
+%{
 for j=1:N_neurons
     Fired = 0;
     %k1 = dt*dphase_dt(Natural_Freqs(j),K,Interaction_matrix(j,j),alpha,O2_rest,O2_current(j));
@@ -422,16 +451,23 @@ for j=1:N_neurons
     diffusion_node = find(Adj_nd(j,:)==1);
     Diff_O2_next(diffusion_node) = Node_O2_diff(diffusion_node) - dt*(D_nd*Interlayer_O2_vec(j));
 end
-
+%}
 %trying to implement the above for loop using matrix methods instead
-%{
-phi_dot = (Natural_Freqs + K*Interaction_vec).*arrayfun(@(x) exp(-alpha*(O2_rest-x)),O2_current);
+
+%exp_O2 = arrayfun(@(x) exp(-alpha*(O2_rest-x)),O2_current);
+exp_O2 = exp(-alpha*O2_rest)*exp(alpha*O2_current);
+phi_dot = (Natural_Freqs + K*Interaction_vec).*exp_O2;
 Phase_next = Phase_current + dt*phi_dot;
 Fired = Phase_next>(2*pi);
-Phase_next = arrayfun(@(x) mod(x,2*pi),Phase_next);
+for j=1:N_neurons
+    while(Phase_next(j)>2*pi)
+        Phase_next(j) = Phase_next(j)-2*pi;
+    end
+end
+%Phase_next = arrayfun(@(x) mod(x,2*pi),Phase_next);
 O2_next = O2_current + dt*D_nd*Interlayer_O2_vec - O2_consumption*Fired;
 Diff_O2_next = Node_O2_diff - dt*D_nd*(Adj_nd'*Interlayer_O2_vec);
-%}
+
 
 
 end
