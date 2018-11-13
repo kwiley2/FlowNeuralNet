@@ -5,10 +5,13 @@
 
 
 function [avg_order_param,var_order_param,avg_O2,var_O2] = FlowDiffusionNeuralSim(K_input,Beta,tanh_spread,O2_avg,D)
-%K_input = 1.5;
-%Beta = 1e-6; %conversion between phase speed and O2 usage
-%tanh_spread = 10; % a factor to control how narrow the tanh distribution is
-%O2_avg = 1; %defines how far the tanh function is offset
+%{
+K_input = 0.2;
+Beta = 0; %conversion between phase speed and O2 usage
+tanh_spread = 10; % a factor to control how narrow the tanh distribution is
+O2_avg = 1; %defines how far the tanh function is offset
+D = 0;
+%}
 
 %% Variable Initialization
 % Load in all necessary information from the flow network generation
@@ -24,17 +27,21 @@ Nodes_X = Network.FlowNetwork.X_positions;
 Nodes_Y = Network.FlowNetwork.Y_positions;
 N_nodes = size(Diffusion_Lattice,1);
 
-% Parameters I reall want to vary are the strength of the
+% Parameters I really want to vary are the strength of the
 % neural coupling and the O2 usage defined by Beta
 % It could also be interesting to vary the shift in the tanh argument
 % defined by O2_avg and the neural topology
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Free Simulation Parameters (Other parameters, such as the underlying
+
 % lattice structure and flow network details exist, but are altered in
 % the piece of code which generates the flow network)
 
-tsteps = 2^13; % Number of steps
-dt = 6e-3; % Step Size
+t_int = 40; % Length of simulation in seconds (or ms or whatever)
+dt = 1e-1; % Step Size
+tsteps = floor(t_int/dt); % Number of steps
+t_start = 1; % When to turn on neurons
+t_stable = 50; % How long to average over after stability
 
 % Amount of O2 that enters flow layer at source node per time step
 O2_bath = 1; %if I consider the flow layer static, this is the O2 supply to every sink node at each time step
@@ -126,18 +133,20 @@ Diffusion = zeros(size(Current_Sinks,1),tsteps+1);
 Node_O2_Flow(Current_Source) = I_O2;
 
 %Initialize the O2 content of each node in the Diffusion layer
-Node_O2_Diff = 0.8*O2_bath*ones(N_nodes,tsteps+1);
+%Node_O2_Diff = 0.8*O2_bath*ones(N_nodes,tsteps+1);
+Node_O2_Diff = zeros(N_nodes,tsteps+1);
 
 %Initialize data variables for the neural layer
 Voltages = zeros(N_neurons,tsteps);
 Phases = zeros(N_neurons,tsteps);
 Phase_vel = zeros(N_neurons,tsteps);
-Phases(:,200) = 2*pi*rand(N_neurons,1);
+Phases(:,t_start) = 2*pi*rand(N_neurons,1);
 %Fire_mat = zeros([N_neurons,N_neurons,tsteps]);
 Voltage_thresh = normrnd(20e-3,1e-3,[N_neurons,1]);
 %Fired = zeros(N_neurons,tsteps);
 Active = ones([N_neurons,tsteps]);
-O2 = 0.8*O2_bath*ones(N_neurons,tsteps);
+%O2 = 0.8*O2_bath*ones(N_neurons,tsteps);
+O2 = zeros(N_neurons,tsteps);
 
 % Define variable electrical properties for each neuron (assuming normal
 % distribution)
@@ -161,38 +170,46 @@ Flow_Lattice = sparse(Flow_Lattice);
 Diffusion_Lattice = sparse(Diffusion_Lattice);
 
 %% Update loop
-%NOTE: There's something a bit weird about time sequencing here. Since
-%update_diff and update_neural both change the oxygen content in the
-%diffusion layer, we have to decide which happens first. As it is, first
-%the diffusion layer updates, then oxygen is pulled from the diffusion
-%layer. I don't think the order should matter much, but it's worth noting
-%in case I find later that it does matter.
+% NOTE: There's something a bit weird about time sequencing here. Since
+% update_diff and update_neural both change the oxygen content in the
+% diffusion layer, we have to decide which happens first. As it is, first
+% the diffusion layer updates, then oxygen is pulled from the diffusion
+% layer. I don't think the order should matter much, but it's worth noting
+% in case I find later that it does matter.
 for i=1:tsteps
-    [Node_O2_Flow(:,i+1),Diffusion(:,i+1)] = update_flow(Node_O2_Flow(:,i),Transition_matrix,Current_Source,Current_Sinks,I_O2);
-    Node_O2_Diff(:,i+1) = update_diff(Node_O2_Diff(:,i),Diffusion_Lattice,Diffusion(:,i),Current_Sinks,dt,D_diff,D_flow_to_diff);
-    %Let the diffusion network get an O2 supply before turning on the
-    %neural layer
-    if(i >= 200)
-        %[Active(:,i), Fired(:,i), Voltages(:,i), O2(:,i),Node_O2_Diff(:,i+1)] = update_neural_if(Active(:,i-1), Fired(:,i-1), Voltages(:,i-1), O2(:,i-1), Resistances, Capacitances, A_neural, dt, K, 9e-5, Voltage_thresh,Node_O2_Diff(:,i+1),Diff_to_Neural_Cxns,D_diff_to_neural,O2_need);
-        [Phases(:,i+1), O2(:,i+1), Node_O2_Diff(:,i+1),Phase_vel(:,i+1)] = update_neural_kuramoto(Phases(:,i), O2(:,i), Natural_Freqs, A_neural, dt, K_coupling,Node_O2_Diff(:,i+1),Adj_nd,D_diff_to_neural,O2_avg,Beta,tanh_spread);
+    %{
+    if(i < 50)
+        [Node_O2_Flow(:,i+1),Diffusion(:,i+1)] = update_flow(Node_O2_Flow(:,i),Transition_matrix,Current_Source,Current_Sinks,I_O2);
+        Node_O2_Diff(:,i+1) = update_diff(Node_O2_Diff(:,i),Diffusion_Lattice,Diffusion(:,i),Current_Sinks,dt,D_diff,D_flow_to_diff);
     end
+    %}
+    % Let the diffusion network get an O2 supply before turning on the
+    % neural layer
+    %if(i >= 50)
+        %[Active(:,i), Fired(:,i), Voltages(:,i), O2(:,i),Node_O2_Diff(:,i+1)] = update_neural_if(Active(:,i-1), Fired(:,i-1), Voltages(:,i-1), O2(:,i-1), Resistances, Capacitances, A_neural, dt, K, 9e-5, Voltage_thresh,Node_O2_Diff(:,i+1),Diff_to_Neural_Cxns,D_diff_to_neural,O2_need);
+        %[Phases(:,i+1), O2(:,i+1), Node_O2_Diff(:,i+1),Phase_vel(:,i+1)] = update_neural_kuramoto(Phases(:,i), O2(:,i), Natural_Freqs, A_neural, dt, K_coupling,Node_O2_Diff(:,i+1),Adj_nd,D_diff_to_neural,O2_avg,Beta,tanh_spread);
+        [Phases(:,i+1), O2(:,i+1), Node_O2_Diff(:,i+1),Phase_vel(:,i+1)] = update_system(Phases(:,i), O2(:,i), Natural_Freqs, A_neural, dt, K_coupling,Node_O2_Diff(:,i),Adj_nd,D_diff_to_neural,O2_avg,Beta,tanh_spread,Diffusion_Lattice,Current_Sinks,D_diff,D_flow_to_diff,O2_bath);
+    %end
 end
 
-%% Plotting
+%% Calc Numeric Output
 
 order_param = zeros(tsteps,1);
-for t=200:tsteps
+for t=t_start:tsteps
     for i=1:N_neurons
         order_param(t) = order_param(t) + exp(1j*Phases(i,t));
     end
 end
 order_param = abs(order_param)/N_neurons;
-avg_order_param = mean(order_param((end-1000):end));
-var_order_param = var(order_param((end-1000):end));
-Node_O2_time_avg = 1/1000*(sum(Node_O2_Diff(:,(end-1000):end),2));
+avg_order_param = mean(order_param((end-t_stable):end));
+var_order_param = var(order_param((end-t_stable):end));
+Node_O2_time_avg = 1/t_stable*(sum(Node_O2_Diff(:,(end-t_stable):end),2));
 avg_O2 = mean(Node_O2_time_avg);
 var_O2 = var(Node_O2_time_avg);
 
+
+%% Plots
+%{
 K_coupling;
 avg_order_param;
 figure(2);
@@ -202,6 +219,7 @@ plot(order_param);
 figure(3);
 plot(Phase_vel(1,1:end));
 
+%{
 figure(4);
 P_fft = fft(Phases(1,:)-pi);
 P2 = abs(P_fft/tsteps);
@@ -219,6 +237,8 @@ dP1(2:end-1) = 2*dP1(2:end-1);
 df = (1/dt)*(0:(tsteps/2))/tsteps;
 plot(df,dP1);
 xlim([0,10]);
+%}
+
 
 figure(6);
 Phase_vel_vec = zeros(size(Phase_vel,1)*size(Phase_vel,2),1);
@@ -230,17 +250,34 @@ for i=1:size(Phase_vel,1)
     end
 end
 Phase_vel_hist = [Phase_vel_vec,Phase_vel_time];
-counts = hist3(Phase_vel_hist,[1000,1639]);
+counts = hist3(Phase_vel_hist,[200,tsteps]);
 imshow(counts);
 axis on;
 
+
+figure(7);
+imagesc(O2);
+colorbar;
+
+% iMac Display
+%{
 set(1,'Position',[0,1000,600,300]);
 set(2,'Position',[0,600,600,300]);
 set(3,'Position',[0,200,600,300]);
 set(4,'Position',[700,1000,600,300]);
 set(5,'Position',[700,600,600,300]);
-set(6,'Position',[1400,1000,600,300]);
+%set(6,'Position',[1400,1000,600,300]);
+%}
 
+% Macbook Air Display
+set(1,'Position',[700,600,600,300]);
+set(2,'Position',[0,600,600,300]);
+set(3,'Position',[0,100,600,300]);
+%set(4,'Position',[700,1000,600,300]);
+%set(5,'Position',[700,600,600,300]);
+set(6,'Position',[0,100,1200,400]);
+set(7,'Position',[700,100,600,300]);
+%}
 %{
 figure(1);
 plot(order_param)
@@ -435,14 +472,16 @@ O2_rest = 0;
 %alpha = O2_avg;
 
 N_neurons = size(Phase_current,1);
-Sin_matrix = sin(Phase_current-Phase_current');
-Interaction_vec = sum(A_neural'.*Sin_matrix,1)';
+%Sin_matrix = sin(Phase_current-Phase_current');
+%Interaction_vec = sum(A_neural'.*Sin_matrix,1)';
 
 O2_diff_nd = Node_O2_diff-O2_current';
 Interlayer_O2_vec = sum(Adj_nd'.*O2_diff_nd,1)';
 
-tanh_O2 = tanh(tanh_spread*(O2_current - O2_avg));
-phi_dot = Natural_Freqs.*(tanh_O2+1) + K*Interaction_vec;
+%tanh_O2 = tanh(tanh_spread*(O2_current - O2_avg));
+%phi_dot = Natural_Freqs.*(tanh_O2+1) + K*Interaction_vec;
+phi_dot = calc_phi_dots(Natural_Freqs,tanh_spread,O2_current,O2_avg,Phase_current,A_neural,K);
+%O2_neur_dot_vec = calc_O2_neur_dots(Node_O2_diff,O2_current,Adj_nd,D_nd,phi_dot,Beta);
 Phase_next = Phase_current + dt*phi_dot;
 %Fired = Phase_next>(2*pi);
 for j=1:N_neurons
@@ -454,10 +493,66 @@ O2_next = O2_current + dt*D_nd*Interlayer_O2_vec - Beta*phi_dot;
 Diff_O2_next = Node_O2_diff - dt*D_nd*(Adj_nd'*Interlayer_O2_vec);
 
 Phase_vel = phi_dot;
+end
 
+function [phi_dot_vec] = calc_phi_dots(Natural_Freqs,S,O2_neur_vec,O2_avg,Phases,A_neural,K_coupling) 
+Sin_matrix = sin(Phases-Phases');
+Interaction_vec = sum(A_neural.*Sin_matrix',2);
+tanh_O2 = tanh(S*(O2_neur_vec - O2_avg));
+phi_dot_vec = Natural_Freqs.*(tanh_O2+1) + K_coupling*Interaction_vec;
+end
 
+function [O2_neur_dot_vec] = calc_O2_neur_dots(O2_diff_vec,O2_neur_vec,Adj_nd,D_nd,phi_dot_vec,Beta)
+
+O2_neur_dot_vec = D_nd*sum(Adj_nd.*(O2_diff_vec-O2_neur_vec')',2) - Beta*phi_dot_vec;
 
 end
+
+function [O2_diff_dot_vec] = calc_O2_diff_dots(O2_diff_vec,O2_bath,Current_Sinks,Adj_diff,Adj_nd,O2_neur_vec,D_nd,D_diff,D_fd)
+O2_bath_vec = O2_diff_vec;
+O2_bath_vec(Current_Sinks) = O2_bath;
+O2_diff_dot_vec = D_fd*(O2_bath_vec - O2_diff_vec) - D_diff*sum(Adj_diff.*(O2_diff_vec - O2_diff_vec'),2) - D_nd*sum(Adj_nd.*(O2_diff_vec - O2_neur_vec')',1)';
+end
+
+function [Phase_next, O2_next, Diff_O2_next,Phase_vel] = update_system(Phase_current, O2_current, Natural_Freqs, A_neural, dt, K,Node_O2_diff,Adj_nd,D_nd,O2_avg,Beta,tanh_spread,Diffusion_Lattice,Current_Sinks,D_diff,D_transfer,O2_bath)
+%{
+% Euler Method
+phi_dot_vec = calc_phi_dots(Natural_Freqs,tanh_spread,O2_current,O2_avg,Phase_current,A_neural,K);
+O2_diff_dot_vec = calc_O2_diff_dots(Node_O2_diff,O2_bath,Current_Sinks,Diffusion_Lattice,Adj_nd,O2_current,D_nd,D_diff,D_transfer);
+O2_neur_dot_vec = calc_O2_neur_dots(Node_O2_diff,O2_current,Adj_nd,D_nd,phi_dot_vec,Beta);
+
+Phase_next = wrapTo2Pi(Phase_current + dt*phi_dot_vec);
+O2_next = O2_current + dt*O2_neur_dot_vec;
+Diff_O2_next = Node_O2_diff + dt*O2_diff_dot_vec;
+Phase_vel = phi_dot_vec;
+%}
+% Runge-Kutta Method (k = phi, l = O2_diff, m = O2_neur)
+phi_dot_vec_0 = calc_phi_dots(Natural_Freqs,tanh_spread,O2_current,O2_avg,Phase_current,A_neural,K);
+k0 = dt*phi_dot_vec_0;
+l0 = dt*calc_O2_diff_dots(Node_O2_diff,O2_bath,Current_Sinks,Diffusion_Lattice,Adj_nd,O2_current,D_nd,D_diff,D_transfer);
+m0 = dt*calc_O2_neur_dots(Node_O2_diff,O2_current,Adj_nd,D_nd,phi_dot_vec_0,Beta);
+
+phi_dot_vec_1 = calc_phi_dots(Natural_Freqs,tanh_spread,O2_current+0.5*m0,O2_avg,Phase_current+0.5*k0,A_neural,K);
+k1 = dt*phi_dot_vec_1;
+l1 = dt*calc_O2_diff_dots(Node_O2_diff+0.5*l0,O2_bath,Current_Sinks,Diffusion_Lattice,Adj_nd,O2_current+0.5*m0,D_nd,D_diff,D_transfer);
+m1 = dt*calc_O2_neur_dots(Node_O2_diff+0.5*l0,O2_current+0.5*m0,Adj_nd,D_nd,phi_dot_vec_1,Beta);
+
+phi_dot_vec_2 = calc_phi_dots(Natural_Freqs,tanh_spread,O2_current+0.5*m1,O2_avg,Phase_current+0.5*k1,A_neural,K);
+k2 = dt*phi_dot_vec_2;
+l2 = dt*calc_O2_diff_dots(Node_O2_diff+0.5*l1,O2_bath,Current_Sinks,Diffusion_Lattice,Adj_nd,O2_current+0.5*m1,D_nd,D_diff,D_transfer);
+m2 = dt*calc_O2_neur_dots(Node_O2_diff+0.5*l1,O2_current+0.5*m1,Adj_nd,D_nd,phi_dot_vec_2,Beta);
+
+phi_dot_vec_3 = calc_phi_dots(Natural_Freqs,tanh_spread,O2_current+m2,O2_avg,Phase_current+k2,A_neural,K);
+k3 = dt*phi_dot_vec_3;
+l3 = dt*calc_O2_diff_dots(Node_O2_diff+l2,O2_bath,Current_Sinks,Diffusion_Lattice,Adj_nd,O2_current+m2,D_nd,D_diff,D_transfer);
+m3 = dt*calc_O2_neur_dots(Node_O2_diff+l2,O2_current+m2,Adj_nd,D_nd,phi_dot_vec_3,Beta);
+
+Phase_next = wrapTo2Pi(Phase_current+1/6*(k0+2*k1+2*k2+k3));
+O2_next = O2_current+1/6*(m0+2*m1+2*m2+m3);
+Diff_O2_next = Node_O2_diff+1/6*(l0+2*l1+2*l2+l3);
+Phase_vel = 1/(6*dt)*(phi_dot_vec_0+2*phi_dot_vec_1+2*phi_dot_vec_2+phi_dot_vec_3);
+end
+
 
 function [output] = dphase_dt(natural_freq, K, interaction,alpha,O2_rest,O2_current) 
 output = (natural_freq+K*interaction)*exp(-alpha*(O2_rest-O2_current));
