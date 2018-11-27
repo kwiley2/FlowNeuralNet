@@ -37,11 +37,11 @@ N_nodes = size(Diffusion_Lattice,1);
 % lattice structure and flow network details exist, but are altered in
 % the piece of code which generates the flow network)
 
-t_int = 40; % Length of simulation in seconds (or ms or whatever)
+t_int = 100; % Length of simulation in seconds (or ms or whatever)
 dt = 1e-1; % Step Size
 tsteps = floor(t_int/dt); % Number of steps
 t_start = 1; % When to turn on neurons
-t_stable = 50; % How long to average over after stability
+t_stable = 200; % How long to average over after stability
 
 % Amount of O2 that enters flow layer at source node per time step
 O2_bath = 1; %if I consider the flow layer static, this is the O2 supply to every sink node at each time step
@@ -176,7 +176,7 @@ Diffusion_Lattice = sparse(Diffusion_Lattice);
 % the diffusion layer updates, then oxygen is pulled from the diffusion
 % layer. I don't think the order should matter much, but it's worth noting
 % in case I find later that it does matter.
-for i=1:tsteps
+for i=1:(tsteps-1)
     %{
     if(i < 50)
         [Node_O2_Flow(:,i+1),Diffusion(:,i+1)] = update_flow(Node_O2_Flow(:,i),Transition_matrix,Current_Source,Current_Sinks,I_O2);
@@ -193,22 +193,41 @@ for i=1:tsteps
 end
 
 %% Calc Numeric Output
-
+%{
 order_param = zeros(tsteps,1);
-for t=t_start:tsteps
+for t=1:tsteps
     for i=1:N_neurons
         order_param(t) = order_param(t) + exp(1j*Phases(i,t));
     end
 end
 order_param = abs(order_param)/N_neurons;
-avg_order_param = mean(order_param((end-t_stable):end));
-var_order_param = var(order_param((end-t_stable):end));
+%}
+sys_order_param = calc_n_step_order_param_vs_t(Phases,A_neural,20);
+one_step_order_param = calc_n_step_order_param_vs_t(Phases,A_neural,1);
+one_step_avg_order_param = mean(one_step_order_param(:,(end-t_stable):end),2);
+sys_avg_order_param = mean(sys_order_param((end-t_stable):end));
+sys_var_order_param = var(sys_order_param((end-t_stable):end));
 Node_O2_time_avg = 1/t_stable*(sum(Node_O2_Diff(:,(end-t_stable):end),2));
 avg_O2 = mean(Node_O2_time_avg);
 var_O2 = var(Node_O2_time_avg);
-
+avg_vel = mean(Phase_vel,1);
 
 %% Plots
+figure(1);
+t = 1:tsteps;
+yyaxis left
+plot(t,avg_vel);
+yyaxis right
+plot(t,sys_order_param(1,:));
+
+figure(2);
+plot(one_step_avg_order_param);
+refline(0,sys_avg_order_param);
+ylim([0,1]);
+
+figure(3);
+plot(t,sys_order_param(1,:),t,one_step_order_param(1,:));
+
 %{
 K_coupling;
 avg_order_param;
@@ -558,3 +577,15 @@ function [output] = dphase_dt(natural_freq, K, interaction,alpha,O2_rest,O2_curr
 output = (natural_freq+K*interaction)*exp(-alpha*(O2_rest-O2_current));
 end
 
+function [n_step_order_param] = calc_n_step_order_param_vs_t(Phases,Adj_mat,n)
+pre_screen = zeros(size(Adj_mat));
+for k=0:n
+    pre_screen = pre_screen + Adj_mat^k;
+end
+pre_screen = pre_screen + pre_screen';
+screen = (pre_screen>0);
+order_param = screen*exp(1j*Phases);
+N_vec = sum(screen,2);
+order_param_mag = abs(order_param);
+n_step_order_param = (1./N_vec).*order_param_mag;
+end
