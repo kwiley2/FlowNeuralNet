@@ -37,7 +37,7 @@ N_nodes = size(Diffusion_Lattice,1);
 % lattice structure and flow network details exist, but are altered in
 % the piece of code which generates the flow network)
 
-t_int = 100; % Length of simulation in seconds (or ms or whatever)
+t_int = 150; % Length of simulation in seconds (or ms or whatever)
 dt = 1e-1; % Step Size
 tsteps = floor(t_int/dt); % Number of steps
 t_start = 1; % When to turn on neurons
@@ -61,12 +61,18 @@ D_diff_to_neural = D;
 
 K = 1.7e-4; %Conversion between synaptic weights and currents
 N_neurons = 100;% number of neurons
-p = 0.9*1/sqrt(N_neurons); %probability of a given synapse existing
+p = 0.9*1/sqrt(N_neurons); %probability of a given synapse existing (ER)
+N1 = 50; %size of community 1
+N2 = N_neurons-N1; %size of community 2
+p_in = 0.9*1/sqrt(N_neurons); %in-community probability of synapse existing (Blockmodel)
+p_out = 0.2*p_in; %out-of-community probability of synapse existing
 rho = 1.4; % Needed to generate E-R neural net graph
 Mean_Resistance = 500; %resistances ~500 Ohms
 Var_Resistance = 100;
 Mean_Capacitance = 20e-6; %capacitances ~20uF
 Var_Capacitance = 3e-6;
+Mean_Freq = 1/(Mean_Resistance*Mean_Capacitance);
+Var_Freq = Mean_Freq*sqrt((Var_Resistance/Mean_Resistance)^2+(Var_Capacitance/Mean_Capacitance)^2);
 %O2_consumption = 30; % Amount of O2 necessary to transition back into active state
 
 %K_coupling = 5;
@@ -77,15 +83,21 @@ K_coupling = K_input;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+
 % Generate Neural Adjacency Matrix
+%{
+%Simplified Kuramoto model version of ER network
 A_neural = gen_adj(N_neurons, p, rho); %ER network
 A_neural(eye(size(A_neural,1))==1) = 0; %Delete self-loops
 A_neural = abs(A_neural);
-
-%Simplified Kuramoto model version
 A_neural = 0.5*(A_neural+A_neural');
 A_neural(A_neural~=0) = 1;
 A_neural = sparse(A_neural);
+%}
+
+% Generate symmetric 2 community network
+[A_neural,Comms] = blockmodel_2community_network(N1,N2,p_in,p_out);
+
 
 % Input and Output Current at each node (not currents along edges, just
 % what enters and leaves the system)
@@ -150,12 +162,16 @@ O2 = zeros(N_neurons,tsteps);
 
 % Define variable electrical properties for each neuron (assuming normal
 % distribution)
+%{
 Capacitances = normrnd(Mean_Capacitance,Var_Capacitance,[N_neurons,1]);
 Resistances = normrnd(Mean_Resistance,Var_Resistance,[N_neurons,1]);
 Natural_Freqs = zeros(N_neurons,1);
 for i=1:N_neurons
     Natural_Freqs(i) = 1/(Capacitances(i)*Resistances(i)); %doesn't really make sense as a frequency, but it does define a time scale, so sort of close
 end
+%}
+
+Natural_Freqs = normrnd(Mean_Freq,Var_Freq,[N_neurons,1]);
 
 % Decide which nodes in the diffusion layer each neuron will be connected
 % to
@@ -203,9 +219,13 @@ end
 order_param = abs(order_param)/N_neurons;
 %}
 sys_order_param = calc_n_step_order_param_vs_t(Phases,A_neural,20);
+comm1_order_param = calc_n_step_order_param_vs_t(Phases(1:N1,:),A_neural(1:N1,1:N1),20);
+comm2_order_param = calc_n_step_order_param_vs_t(Phases((N1+1):N_neurons,:),A_neural((N1+1):N_neurons,(N1+1):N_neurons),20);
 one_step_order_param = calc_n_step_order_param_vs_t(Phases,A_neural,1);
 one_step_avg_order_param = mean(one_step_order_param(:,(end-t_stable):end),2);
 sys_avg_order_param = mean(sys_order_param((end-t_stable):end));
+comm1_avg_order_param = mean(comm1_order_param((end-t_stable):end));
+comm2_avg_order_param = mean(comm2_order_param((end-t_stable):end));
 sys_var_order_param = var(sys_order_param((end-t_stable):end));
 Node_O2_time_avg = 1/t_stable*(sum(Node_O2_Diff(:,(end-t_stable):end),2));
 avg_O2 = mean(Node_O2_time_avg);
@@ -228,11 +248,21 @@ ylim([0,1]);
 figure(3);
 plot(t,sys_order_param(1,:),t,one_step_order_param(1,:));
 
+figure(4);
+avg_vel_1 = mean(Phase_vel(1:N1,:),1);
+avg_vel_2 = mean(Phase_vel((N1+1):N_neurons,:),1);
+plot(t,avg_vel_1,t,avg_vel_2);
+
+figure(5);
+plot(t,comm1_order_param(1,:),t,comm2_order_param(1,:));
+
 %{
 K_coupling;
 avg_order_param;
+%}
 figure(2);
 plot(Phases(1,1:end));
+%{
 figure(1);
 plot(order_param);
 figure(3);
