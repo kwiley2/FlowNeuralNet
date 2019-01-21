@@ -4,14 +4,14 @@
 % {2, 1e-6, 10, 1,0.5} - Similar bursting behavior to that seen before
 
 
-function [avg_order_param,var_order_param,avg_O2,var_O2] = FlowDiffusionNeuralSim(K_input,Beta,tanh_spread,O2_avg,D)
-%{
-K_input = 0.2;
-Beta = 0; %conversion between phase speed and O2 usage
+%function [avg_order_param,var_order_param,avg_O2,var_O2] = FlowDiffusionNeuralSim(K_input,Beta,tanh_spread,O2_avg,D)
+
+K_input = 2;
+Beta = 5e-2; %conversion between phase speed and O2 usage
 tanh_spread = 10; % a factor to control how narrow the tanh distribution is
-O2_avg = 1; %defines how far the tanh function is offset
-D = 0;
-%}
+O2_avg = 0.85; %defines how far the tanh function is offset
+D = 5;
+
 
 %% Variable Initialization
 % Load in all necessary information from the flow network generation
@@ -37,8 +37,8 @@ N_nodes = size(Diffusion_Lattice,1);
 % lattice structure and flow network details exist, but are altered in
 % the piece of code which generates the flow network)
 
-t_int = 150; % Length of simulation in seconds (or ms or whatever)
-dt = 1e-1; % Step Size
+t_int = 50; % Length of simulation in seconds (or ms or whatever)
+dt = 5e-3; % Step Size
 tsteps = floor(t_int/dt); % Number of steps
 t_start = 1; % When to turn on neurons
 t_stable = 200; % How long to average over after stability
@@ -85,7 +85,7 @@ K_coupling = K_input;
 
 
 % Generate Neural Adjacency Matrix
-%{
+
 %Simplified Kuramoto model version of ER network
 A_neural = gen_adj(N_neurons, p, rho); %ER network
 A_neural(eye(size(A_neural,1))==1) = 0; %Delete self-loops
@@ -93,10 +93,10 @@ A_neural = abs(A_neural);
 A_neural = 0.5*(A_neural+A_neural');
 A_neural(A_neural~=0) = 1;
 A_neural = sparse(A_neural);
-%}
+
 
 % Generate symmetric 2 community network
-[A_neural,Comms] = blockmodel_2community_network(N1,N2,p_in,p_out);
+%[A_neural,Comms] = blockmodel_2community_network(N1,N2,p_in,p_out);
 
 
 % Input and Output Current at each node (not currents along edges, just
@@ -209,15 +209,17 @@ for i=1:(tsteps-1)
 end
 
 %% Calc Numeric Output
-%{
+
 order_param = zeros(tsteps,1);
 for t=1:tsteps
     for i=1:N_neurons
         order_param(t) = order_param(t) + exp(1j*Phases(i,t));
     end
 end
+group_phase = angle(order_param);
+group_phase = group_phase + pi;
 order_param = abs(order_param)/N_neurons;
-%}
+
 sys_order_param = calc_n_step_order_param_vs_t(Phases,A_neural,20);
 comm1_order_param = calc_n_step_order_param_vs_t(Phases(1:N1,:),A_neural(1:N1,1:N1),20);
 comm2_order_param = calc_n_step_order_param_vs_t(Phases((N1+1):N_neurons,:),A_neural((N1+1):N_neurons,(N1+1):N_neurons),20);
@@ -232,14 +234,42 @@ avg_O2 = mean(Node_O2_time_avg);
 var_O2 = var(Node_O2_time_avg);
 avg_vel = mean(Phase_vel,1);
 
+Phase_Diffs = bsxfun(@minus,Phases,group_phase');
+Avg_Phase_Diffs = mean(abs(sin(Phase_Diffs(:,(end-1000):end))),2);
+figure(2);
+plot(Avg_Phase_Diffs);
+is_phase_outlier = zeros(N_neurons,1);
+is_vel_outlier = zeros(N_neurons,1);
+for i=1:size(Avg_Phase_Diffs)
+    if(Avg_Phase_Diffs(i) > 0.4)
+        text(i,Avg_Phase_Diffs(i),int2str(i));
+        is_phase_outlier(i) = 1;
+    end
+end
+avg_phase_vel = mean(mean(Phase_vel(:,(end-2000):end)));
+for i=1:size(Avg_Phase_Diffs,1)
+    if(abs(mean(Phase_vel(i,(end-2000):end),2)-avg_phase_vel)/avg_phase_vel>0.05)
+        is_vel_outlier(i) = 1;
+        text(i,(Avg_Phase_Diffs(i)*1.05),"vel");
+    end
+end 
+title("Large Phase Offset and Asynchronous Neurons");
+xlabel("Neuron number");
+ylabel("Distance from mean");
+
 %% Plots
+
 figure(1);
 t = 1:tsteps;
 yyaxis left
+ylabel("Phase velocity");
 plot(t,avg_vel);
 yyaxis right
+ylabel("Order parameter");
 plot(t,sys_order_param(1,:));
-
+xlabel("time");
+title("Phase Velocity and Order Parameter");
+%{
 figure(2);
 plot(one_step_avg_order_param);
 refline(0,sys_avg_order_param);
@@ -255,20 +285,20 @@ plot(t,avg_vel_1,t,avg_vel_2);
 
 figure(5);
 plot(t,comm1_order_param(1,:),t,comm2_order_param(1,:));
+%}
 
 %{
 K_coupling;
 avg_order_param;
-%}
+
 figure(2);
 plot(Phases(1,1:end));
-%{
+
 figure(1);
 plot(order_param);
 figure(3);
 plot(Phase_vel(1,1:end));
 
-%{
 figure(4);
 P_fft = fft(Phases(1,:)-pi);
 P2 = abs(P_fft/tsteps);
@@ -286,7 +316,7 @@ dP1(2:end-1) = 2*dP1(2:end-1);
 df = (1/dt)*(0:(tsteps/2))/tsteps;
 plot(df,dP1);
 xlim([0,10]);
-%}
+
 
 
 figure(6);
@@ -304,9 +334,11 @@ imshow(counts);
 axis on;
 
 
+
 figure(7);
 imagesc(O2);
 colorbar;
+%}
 
 % iMac Display
 %{
@@ -318,7 +350,9 @@ set(5,'Position',[700,600,600,300]);
 %set(6,'Position',[1400,1000,600,300]);
 %}
 
+
 % Macbook Air Display
+%{
 set(1,'Position',[700,600,600,300]);
 set(2,'Position',[0,600,600,300]);
 set(3,'Position',[0,100,600,300]);
@@ -336,24 +370,118 @@ plot1 = imagesc(Node_O2_Diff);
 plot1(1,1).CData(Current_Sinks,1:5) = 255;
 %plot1(1,1).CData(deg<3,6:10) = 200;
 
+
 Diffusion_Graph = graph(Diffusion_Lattice);
-Diffusion_Graph.Nodes.Size = Node_O2_Diff(:,size(Node_O2_Diff,2));
+Diffusion_Graph.Nodes.Size = Node_O2_Diff(:,end-1);
 title('Diffusion O_2 Content vs. Time');
 xlabel('Time (ms)');
 ylabel('Node');
 colorbar;
+%}
+
+%%%%%%%%%%%%%%%%%%%%% Cool Slider Time Plot %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 figure(3);
-plot2 = plot(Diffusion_Graph,'XData',Nodes_X,'YData',Nodes_Y);
+cm = colormap;
+Flow_Graph = graph(Flow_Lattice);
+Diffusion_Graph = graph(Diffusion_Lattice);
+Diffusion_Graph.Nodes.Size = Node_O2_Diff(:,end-1);
+%highlight(plot2,'LineWidth',20*Flow_Graph.Edges.Weight/max(Flow_Graph.Edges.Weight));
+plot2 = plot(Flow_Graph,'XData',Nodes_X,'YData',Nodes_Y,'LineWidth',20*Flow_Graph.Edges.Weight/max(Flow_Graph.Edges.Weight));
+is_doubly_connected = zeros(N_neurons,1);
 for i=1:N_nodes
-    highlight(plot2,i,'MarkerSize',10*Diffusion_Graph.Nodes.Size(i)/max(Diffusion_Graph.Nodes.Size));
-    for j=1:N_neurons
-        if(i==Random_List(j))
-            highlight(plot2,i,'NodeColor','g');
-        end
-    end
+    f = Diffusion_Graph.Nodes.Size(i)/max(Diffusion_Graph.Nodes.Size);
+    colorID = sum(f>[0:1/length(cm(:,1)):1]);
+    highlight(plot2,i,'NodeColor',cm(colorID,:));
+    highlight(plot2,i,'MarkerSize',15);
 end
-title('Diffusion Layer (Size = O_2 Content at end of Sim, Color = Cxn to Neuron)');
+for j=1:N_neurons
+    highlight(plot2,Random_List(j),'Marker','s');
+    labelnode(plot2,Random_List(j),j);
+end
+Markers = get(plot2,'Marker');
+for j=1:size(Current_Sinks,1)
+    if(Markers{Current_Sinks(j)} == "square")
+        highlight(plot2,Current_Sinks(j),'Marker','p');
+    else
+        highlight(plot2,Current_Sinks(j),'Marker','d');
+    end
+end 
+Markers = get(plot2,'Marker');
+doubles = find(Markers=="pentagram");
+for i=1:size(doubles,2)
+    is_doubly_connected(find(Random_List==doubles(i))) = 1;
+end
+
+colorbar;
+title('Diffusion Layer (Square = Neuron Cxn, Diamond = O2 Source, Star = Both, Circle = Neither)');
+h = uicontrol('style','slider','units','pixel','position',[20 20 300 20]);
+addlistener(h,'ContinuousValueChange',@(hObject, event) updatePlot(hObject, event,x,plot2,tsteps,Node_O2_Diff));
+
+fprintf('Number of Outliers: %d\n',sum(is_phase_outlier));
+fprintf('Doubly Connected Outliers: %d\n',sum(is_doubly_connected(find(is_phase_outlier))));
+
+figure(4);
+Neural_Graph = graph(A_neural);
+plot(Neural_Graph);
+
+figure(5);
+predicted_avg_vel = D*(O2_bath-O2_avg+1/tanh_spread)/(Beta*(1+N_neurons/size(Current_Sinks,1))+D/tanh_spread/mean(Natural_Freqs));
+avg_vel_vec = predicted_avg_vel*ones(size(Natural_Freqs,1),1);
+internal_vel_vec = Natural_Freqs.*(tanh(tanh_spread*(O2(:,end)-O2_avg))+1);
+diff_vec = abs(avg_vel_vec-internal_vel_vec);
+degree_vec = sum(A_neural,2);
+thresh_vec = K_input*degree_vec*order_param(end);
+plot(diff_vec-thresh_vec);
+zero_x = linspace(min(diff_vec), max(diff_vec), 200);
+zero_y = zeros(size(zero_x,1),1);
+title("Predicting Asynchronous Neurons");
+xlabel("Neuron Number");
+ylabel("Prediction (>0 means can't synch)");
+hold on;
+plot(zero_x,zero_y);
+hold off;
+
+syms r
+r_pred = vpasolve(r - calcSqrtSum(N_neurons,Natural_Freqs,K_input,degree_vec,r,tanh_spread,O2(:,end),O2_avg,mean(Phase_vel(:,end))) == 0,r);
+
+%finding how many "steps" away from a source each neuron is
+Oxygen_vector = zeros(size(Adj_nd,2),1);
+Oxygen_vector(Current_Sinks) = 1;
+Steps_vec = zeros(size(Adj_nd,2),1);
+step_ctr = 1;
+Steps_vec(Oxygen_vector>0) = step_ctr;
+Diag_mat = eye(size(Diffusion_Lattice,1)).*sum(Diffusion_Lattice,2);
+while(sum(Oxygen_vector==0)>0)
+    Oxygen_vector_temp = Oxygen_vector + 0.01*(Diffusion_Lattice - Diag_mat)*Oxygen_vector;
+    step_ctr = step_ctr + 1;
+    Steps_vec(((Oxygen_vector_temp>0)-(Oxygen_vector>0))==1) = step_ctr;
+    Oxygen_vector = Oxygen_vector_temp;
+end
+Neuron_steps = Adj_nd*Steps_vec;
+figure(8);
+scatter(Neuron_steps,O2(:,end));
+coeffs = polyfit(Neuron_steps,O2(:,end),1);
+fittedX = linspace(min(Neuron_steps), max(Neuron_steps), 200);
+fittedY = polyval(coeffs,fittedX);
+hold on;
+plot(fittedX,fittedY);
+hold off;
+title("Distance from Source vs. Equilibrium O2");
+xlabel("Number of Steps");
+ylabel("Neuron Equilibrium O2");
+%Calculate R^2
+SS_tot = 0;
+SS_res = 0;
+O2_bar = mean(O2(:,end));
+for i=1:size(O2(:,end),1)
+    SS_tot = SS_tot + (O2(i,end) - O2_bar)^2;
+    SS_res = SS_res + (O2(i,end) - (coeffs(2) + coeffs(1)*Neuron_steps(i)))^2;
+end
+R2 = 1 - SS_res/SS_tot;
+    
+
+
 %{
 figure(4);
 Flow_Graph = graph(Flow_Lattice);
@@ -392,16 +520,16 @@ title('DFT of Net Activity');
 xlabel('Frequency (Hz)');
 ylabel('Magnitude');
 %}
-set(1,'Position',[0,1000,600,300]);
-set(2,'Position',[300,127,300,300]);
-set(3,'Position',[0,128,300,300]);
+%set(1,'Position',[0,1000,600,300]);
+%set(2,'Position',[300,127,300,300]);
+%set(3,'Position',[0,128,300,300]);
 %set(4,'Position',[600,1000,800,300]);
 %{
 set(5,'Position',[600,300,800,150]);
 set(6,'Position',[600,90,800,150]);
 %}
 %}
-end
+%end
 
 function [Node_O2_next,diffusable_O2] = update_flow(Node_O2_current,Transition_matrix,Current_Source,Current_Sinks,I_O2)
 
@@ -599,7 +727,7 @@ m3 = dt*calc_O2_neur_dots(Node_O2_diff+l2,O2_current+m2,Adj_nd,D_nd,phi_dot_vec_
 Phase_next = wrapTo2Pi(Phase_current+1/6*(k0+2*k1+2*k2+k3));
 O2_next = O2_current+1/6*(m0+2*m1+2*m2+m3);
 Diff_O2_next = Node_O2_diff+1/6*(l0+2*l1+2*l2+l3);
-Phase_vel = 1/(6*dt)*(phi_dot_vec_0+2*phi_dot_vec_1+2*phi_dot_vec_2+phi_dot_vec_3);
+Phase_vel = 1/6*(phi_dot_vec_0+2*phi_dot_vec_1+2*phi_dot_vec_2+phi_dot_vec_3);
 end
 
 
@@ -619,3 +747,24 @@ N_vec = sum(screen,2);
 order_param_mag = abs(order_param);
 n_step_order_param = (1./N_vec).*order_param_mag;
 end
+
+function updatePlot(hObject,event,x,hplot,tsteps,Node_O2_Diff)
+t = floor((tsteps-1)*get(hObject,'Value'))+1;
+Weights = Node_O2_Diff(:,t);
+cm = colormap;
+for i=1:size(Node_O2_Diff,1)
+    f = Weights(i)/max(Weights);
+    colorID = sum(f>[0:1/length(cm(:,1)):1]);    
+    highlight(hplot,i,'NodeColor',cm(colorID,:));
+end
+drawnow;
+end
+
+function [sum] = calcSqrtSum(N,Omega,K,deg,x,S,O2,O2_avg,avg_vel)
+sum = 0;
+for i=1:N
+    sum = sum + sqrt(1-(Omega(i)-avg_vel)/(K*deg(i)*x)*(tanh(S*(O2(i)-O2_avg))+1));
+end
+sum = sum/N;
+end
+    
