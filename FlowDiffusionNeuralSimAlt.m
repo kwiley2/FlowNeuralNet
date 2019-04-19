@@ -4,21 +4,25 @@
 % {2, 1e-6, 10, 1,0.5} - Similar bursting behavior to that seen before
 
 
-%function [avg_order_param,var_order_param,avg_O2,var_O2] = FlowDiffusionNeuralSim(K_input,Beta,tanh_spread,O2_avg,D)
-%function [Phase_vel_out] = FlowDiffusionNeuralSimAlt(K_coupling,K_independent,Beta)
+%function [avg_order_param,var_order_param,avg_O2,var_O2,] = FlowDiffusionNeuralSim(K_input,Beta,tanh_spread,O2_avg,D)
+% Want to run the full model simulation, then run a Kuramoto simulation
+% with the same topology and internal frequency distribution as the full
+% model simulation has at maximum coupling. Fingers crossed that this null
+% model will give the best comparison with the energy picture
+function [order_param_vec,O2_diff_vec,Internal_freq_vec,A_neural,Adj_nd] = FlowDiffusionNeuralSimAlt(Beta,K_coupling,KuramotoMean,KuramotoStdDev,Kuramoto_A_neural,Kuramoto_Adj_nd)
 
 %K_coupling = [0:5]*1;
 %K_coupling = [1.3 1.4];
 K_independent = 1; % 0 if varying D,Beta; 1 if varying K
-if(K_independent == 1)
-    K_coupling = [0:0.1:5 5.2:0.2:10];
-    %K_coupling = 0;
+%if(K_independent == 1)
+    %K_coupling = [0:0.1:5 5.2:0.2:10];
+    %K_coupling = [0 1 2];
 %    K_coupling = 0;
-else
-    K_coupling = 5;
-end
+%else
+%    K_coupling = 5;
+%end
 Scales = 1+0.1*[-5:1:5];
-Beta = 0;
+%Beta = 0;
 %Beta = 15e-3; %conversion between phase speed and O2 usage
 tanh_spread = 10; % a factor to control how narrow the tanh distribution is
 O2_avg = 0.85; %defines how far the tanh function is offset
@@ -97,6 +101,10 @@ A_neural = A_neural+A_neural';
 A_neural(A_neural~=0) = 1;
 A_neural = sparse(A_neural);
 
+if(Beta==0)
+    A_neural = Kuramoto_A_neural;
+end
+
 
 % Generate symmetric 2 community network
 %[A_neural,Comms] = blockmodel_2community_network(N1,N2,p_in,p_out);
@@ -172,7 +180,7 @@ Natural_Freqs = normrnd(Mean_Freq,Var_Freq,[N_neurons,1]);
 % Rescale natural frequencies for comparison to standard Kuramoto
 if(Beta==0)
     % Hardcoded numbers for the moment, but could change later
-    Natural_Freqs = 1/1.9*normrnd(20.75,7.45,[N_neurons,1]);
+    Natural_Freqs = 1/1.9*normrnd(KuramotoMean,KuramotoStdDev,[N_neurons,1]);
 end
 
 % Decide which nodes in the diffusion layer each neuron will be connected
@@ -183,6 +191,9 @@ for i=1:N_neurons
     Adj_nd(i,Random_List(i)) = 1;
 end
 Adj_nd = sparse(Adj_nd);
+if(Beta==0)
+    Adj_nd = Kuramoto_Adj_nd;
+end
 Flow_Lattice = sparse(Flow_Lattice);
 Diffusion_Lattice = sparse(Diffusion_Lattice);
 
@@ -382,7 +393,7 @@ O2_neur_vec_mean = mean(O2_neur_vec(:,:,(end-3000):end),3);
 O2_neur_mean = mean(O2_neur_vec_mean,2);
 O2_neur_var = sum((O2_neur_vec_mean - O2_neur_mean).^2,2);
 
-plot(tanh(10*(O2_neur_vec_mean(:,:)-O2_avg))+1);
+Internal_freq_vec = Natural_Freqs.*(tanh(tanh_spread*(mean(O2(:,end-t_stable:end),2) - O2_avg))+1);
 %{
 figure(3);
 histogram(mean(Phase_vel(:,(end-t_stable):end),2));
@@ -793,7 +804,7 @@ set(5,'Position',[600,300,800,150]);
 set(6,'Position',[600,90,800,150]);
 %}
 %}
-%end
+end
 
 function [Node_O2_next,diffusable_O2] = update_flow(Node_O2_current,Transition_matrix,Current_Source,Current_Sinks,I_O2)
 
