@@ -10,7 +10,7 @@ t_start = 1; % When to turn on neurons
 t_stable_sec = 20; % How long to average over after stability
 t_stable = 20/dt;
 
-[order_param_full,O2_vec_full,Internal_freq_vec,A_neural,Adj_nd] = FlowDiffusionNeuralSimAlt(Beta_Full,K_coupling0,0,0,0);
+[order_param_full,O2_vec_full,Internal_freq_vec,A_neural,Adj_nd] = FlowDiffusionNeuralSimAlt(Beta_Full,K_coupling,0,0,0,0);
 [order_param_kuramoto,~,~,~,~] = FlowDiffusionNeuralSimAlt(Beta_Kuramoto,K_coupling,mean(Internal_freq_vec),sqrt(var(Internal_freq_vec)),A_neural,Adj_nd);
 
 order_param_full_mean = mean(order_param_full(:,end-t_stable:end),2);
