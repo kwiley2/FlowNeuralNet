@@ -9,7 +9,7 @@
 % with the same topology and internal frequency distribution as the full
 % model simulation has at maximum coupling. Fingers crossed that this null
 % model will give the best comparison with the energy picture
-function [order_param_vec,O2_diff_vec,Internal_freq_vec,A_neural,Adj_nd] = FlowDiffusionNeuralSimAlt(Beta,K_coupling,KuramotoMean,KuramotoStdDev,Kuramoto_A_neural,Kuramoto_Adj_nd)
+function [order_param_vec,O2_diff_vec,Internal_freq_vec,A_neural,Adj_nd] = FlowDiffusionNeuralSimAlt(Beta,K_coupling,KuramotoFreqs,Kuramoto_A_neural,Kuramoto_Adj_nd)
 
 %K_coupling = [0:5]*1;
 %K_coupling = [1.3 1.4];
@@ -180,7 +180,8 @@ Natural_Freqs = normrnd(Mean_Freq,Var_Freq,[N_neurons,1]);
 % Rescale natural frequencies for comparison to standard Kuramoto
 if(Beta==0)
     % Hardcoded numbers for the moment, but could change later
-    Natural_Freqs = 1/1.9*normrnd(KuramotoMean,KuramotoStdDev,[N_neurons,1]);
+    %Natural_Freqs = 1/1.9*normrnd(KuramotoMean,KuramotoStdDev,[N_neurons,1]);
+    Natural_Freqs = KuramotoFreqs/1.9;
 end
 
 % Decide which nodes in the diffusion layer each neuron will be connected
@@ -393,7 +394,8 @@ O2_neur_vec_mean = mean(O2_neur_vec(:,:,(end-3000):end),3);
 O2_neur_mean = mean(O2_neur_vec_mean,2);
 O2_neur_var = sum((O2_neur_vec_mean - O2_neur_mean).^2,2);
 
-Internal_freq_vec = Natural_Freqs.*(tanh(tanh_spread*(mean(O2(:,end-t_stable:end),2) - O2_avg))+1);
+%Internal_freq_vec = Natural_Freqs.*(tanh(tanh_spread*(mean(O2(:,end-t_stable:end),2) - O2_avg))+1);
+Internal_freq_vec = Natural_Freqs.*(tanh(tanh_spread*(O2_neur_vec_mean(1,:)' - O2_avg))+1);
 %{
 figure(3);
 histogram(mean(Phase_vel(:,(end-t_stable):end),2));
