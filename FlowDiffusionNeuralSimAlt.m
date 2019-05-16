@@ -4,12 +4,22 @@
 % {2, 1e-6, 10, 1,0.5} - Similar bursting behavior to that seen before
 
 
-%function [avg_order_param,var_order_param,avg_O2,var_O2,] = FlowDiffusionNeuralSim(K_input,Beta,tanh_spread,O2_avg,D)
+%function [avg_order_param,var_order_param,avg_O2,var_O2,] = FlowDiffusionNeuralSim(K_inpu[t,Beta,tanh_spread,O2_avg,D)
 % Want to run the full model simulation, then run a Kuramoto simulation
 % with the same topology and internal frequency distribution as the full
 % model simulation has at maximum coupling. Fingers crossed that this null
 % model will give the best comparison with the energy picture
-function [order_param_vec,O2_diff_vec,Internal_freq_vec,A_neural,Adj_nd] = FlowDiffusionNeuralSimAlt(Beta,K_coupling,KuramotoFreqs,Kuramoto_A_neural,Kuramoto_Adj_nd)
+function [order_param_vec,O2_diff_vec,Internal_freq_vec_low,Internal_freq_vec_high,A_neural,Adj_nd] = FlowDiffusionNeuralSimAlt(Beta,K_coupling,KuramotoFreqs,Kuramoto_A_neural,Kuramoto_Adj_nd,N_neur)
+%function [order_param_vec,O2_diff_vec,Internal_freq_vec,A_neural,Adj_nd] = FlowDiffusionNeuralSimAlt(Beta,K_coupling,N_neur)
+%Beta = 15e-3;
+%K_coupling = 1.1;
+%When running DoubleModelSimulation, set N_neur to 0
+%When running FiniteSizeAnalysis, N_neur will never be 0
+if(N_neur == 0)
+    N_neurons = 100;
+else
+    N_neurons = N_neur;
+end
 
 %K_coupling = [0:5]*1;
 %K_coupling = [1.3 1.4];
@@ -72,10 +82,10 @@ D_diff = D;
 D_diff_to_neural = D;
 
 K = 1.7e-4; %Conversion between synaptic weights and currents
-N_neurons = 100;% number of neurons
+%N_neurons = N_neur;% number of neurons
 %p = 0.9*1/sqrt(N_neurons); %probability of a given synapse existing (ER)
 p = 0.2;
-N1 = 50; %size of community 1
+N1 = N_neurons/2; %size of community 1
 N2 = N_neurons-N1; %size of community 2
 p_in = 0.9*1/sqrt(N_neurons); %in-community probability of synapse existing (Blockmodel)
 p_out = 0.2*p_in; %out-of-community probability of synapse existing
@@ -101,9 +111,11 @@ A_neural = A_neural+A_neural';
 A_neural(A_neural~=0) = 1;
 A_neural = sparse(A_neural);
 
-if(Beta==0)
+% REPLACE THESE LINES LATER
+if(Beta==0 && N_neur == 0)
     A_neural = Kuramoto_A_neural;
 end
+% REPLACE THESE LINES LATER
 
 
 % Generate symmetric 2 community network
@@ -181,7 +193,12 @@ Natural_Freqs = normrnd(Mean_Freq,Var_Freq,[N_neurons,1]);
 if(Beta==0)
     % Hardcoded numbers for the moment, but could change later
     %Natural_Freqs = 1/1.9*normrnd(KuramotoMean,KuramotoStdDev,[N_neurons,1]);
-    Natural_Freqs = KuramotoFreqs/1.9;
+    if(N_neur == 0)
+        Natural_Freqs = KuramotoFreqs/1.9;
+    else
+        Natural_Freqs = Natural_Freqs/1.9;
+    end
+    %Natural_Freqs = Natural_Freqs/1.9;
 end
 
 % Decide which nodes in the diffusion layer each neuron will be connected
@@ -192,9 +209,10 @@ for i=1:N_neurons
     Adj_nd(i,Random_List(i)) = 1;
 end
 Adj_nd = sparse(Adj_nd);
-if(Beta==0)
+if(Beta==0 && N_neur == 0)
     Adj_nd = Kuramoto_Adj_nd;
 end
+% REPLACE THESE LINES ^^^
 Flow_Lattice = sparse(Flow_Lattice);
 Diffusion_Lattice = sparse(Diffusion_Lattice);
 
@@ -395,7 +413,8 @@ O2_neur_mean = mean(O2_neur_vec_mean,2);
 O2_neur_var = sum((O2_neur_vec_mean - O2_neur_mean).^2,2);
 
 %Internal_freq_vec = Natural_Freqs.*(tanh(tanh_spread*(mean(O2(:,end-t_stable:end),2) - O2_avg))+1);
-Internal_freq_vec = Natural_Freqs.*(tanh(tanh_spread*(O2_neur_vec_mean(1,:)' - O2_avg))+1);
+Internal_freq_vec_low = Natural_Freqs.*(tanh(tanh_spread*(O2_neur_vec_mean(1,:)' - O2_avg))+1);
+Internal_freq_vec_high = Natural_Freqs.*(tanh(tanh_spread*(O2_neur_vec_mean(end,:)' - O2_avg))+1);
 %{
 figure(3);
 histogram(mean(Phase_vel(:,(end-t_stable):end),2));
