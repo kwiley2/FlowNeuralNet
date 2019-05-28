@@ -13,6 +13,7 @@ function [order_param_vec,O2_diff_vec,Internal_freq_vec_low,Internal_freq_vec_hi
 %function [order_param_vec,O2_diff_vec,Internal_freq_vec,A_neural,Adj_nd] = FlowDiffusionNeuralSimAlt(Beta,K_coupling,N_neur)
 %Beta = 15e-3;
 %K_coupling = 1.1;
+%N_neur = 100;
 %When running DoubleModelSimulation, set N_neur to 0
 %When running FiniteSizeAnalysis, N_neur will never be 0
 if(N_neur == 0)
@@ -103,6 +104,7 @@ Var_Freq = Mean_Freq*sqrt((Var_Resistance/Mean_Resistance)^2+(Var_Capacitance/Me
 % Generate Neural Adjacency Matrix
 
 %Simplified Kuramoto model version of ER network
+%{
 A_neural = gen_adj(N_neurons, p, rho); %ER network
 A_neural(eye(size(A_neural,1))==1) = 0; %Delete self-loops
 A_neural = abs(A_neural);
@@ -110,6 +112,10 @@ A_neural = triu(A_neural);
 A_neural = A_neural+A_neural';
 A_neural(A_neural~=0) = 1;
 A_neural = sparse(A_neural);
+%}
+
+% Watts-Strogatz Small World Network
+A_neural = WattsStrogatz(N_neurons,(ceil((N_neurons-1)*p/2)),1);
 
 % REPLACE THESE LINES LATER
 if(Beta==0 && N_neur == 0)

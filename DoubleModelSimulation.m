@@ -1,7 +1,8 @@
 % Triple model simulation (Full + Null Model Kuramoto Low Order + Null Kuramoto High Order)
 Beta_Full = 15e-3;
 Beta_Kuramoto = 0;
-K_coupling = [0:0.1:5 5.2:0.2:10];
+%K_coupling = [0:0.1:5 5.2:0.2:10];
+K_coupling = [0:0.5:5 6:1:10];
 %K_coupling = [0 1 2 5];
 
 t_int = 30; % Length of simulation in seconds (or ms or whatever)
@@ -31,64 +32,67 @@ O2_mean_full = mean(mean(O2_vec_full(:,:,end-t_stable:end),3),2);
 %O2_var_full = var(mean(O2_vec_full(:,:,end-t_stable:end),3)');
 O2_var_full = sum((mean(O2_vec_full(:,:,end-t_stable:end),3) - O2_mean_full).^2,2);
 
-%Colors = [0.8 0.2 0; 0 0.2 0.8; 0.2 0.6 0.2];
-Colors = [1 1 0.4; 1 0.5 0.6; 200/256 26/256 54/256];
-txtcol = [1 216/255 95/255];
+Colors = [0.8 0.2 0; 0 0.2 0.8; 0.2 0.6 0.2];
+%Colors = [1 1 0.4; 1 0.5 0.6; 200/256 26/256 54/256];
+%txtcol = [1 216/255 95/255];
+txtcol = [0 0 0];
+bkgdcol = [1 1 1];
+fontsize = 14;
 figure(1);
 %boxplot(F,'Positions',[(K_coupling-0.04) (K_coupling) (K_coupling + 0.04)],'OutlierSize',1,'Colors',Colors,'Widths',0.015,'MedianStyle','target','Symbol','o');
 a = boxplot(order_param_full(:,2500:7500)','Positions',K_coupling-0.015,'OutlierSize',1,'Colors',Colors(1,:),'Widths',0.015,'MedianStyle','target','Symbol','o');
 hold on;
-b = boxplot(order_param_kuramoto_low(1:7,2500:7500)','Positions',K_coupling(1:7)+0.045,'OutlierSize',1,'Colors',Colors(2,:),'Widths',0.015,'MedianStyle','target','Symbol','o');
-c = boxplot(order_param_kuramoto_high(15:end,2500:7500)','Positions',K_coupling(15:end)+0.015,'OutlierSize',1,'Colors',Colors(3,:),'Widths',0.015,'MedianStyle','target','Symbol','o');
-for ih=1:size(order_param_full,1)
-    set(a(:,ih),'LineWidth',1.5); % Set the line width of the Box outlines here
-end
-for ih=1:7
-    set(b(:,ih),'LineWidth',1.5); % Set the line width of the Box outlines here
-end
-for ih=1:62
-    set(c(:,ih),'LineWidth',1.5); % Set the line width of the Box outlines here
-end
-%set(gca,'ycolor',Colors(2,:)) 
+b = boxplot(order_param_kuramoto_low(1:3,2500:7500)','Positions',K_coupling(1:3)+0.045,'OutlierSize',1,'Colors',Colors(2,:),'Widths',0.015,'MedianStyle','target','Symbol','o');
+c = boxplot(order_param_kuramoto_high(6:end,2500:7500)','Positions',K_coupling(6:end)+0.015,'OutlierSize',1,'Colors',Colors(3,:),'Widths',0.015,'MedianStyle','target','Symbol','o');
+%for ih=1:size(order_param_full,1)
+%    set(a(:,ih),'LineWidth',1.5); % Set the line width of the Box outlines here
+%end
+%for ih=1:7
+%    set(b(:,ih),'LineWidth',1.5); % Set the line width of the Box outlines here
+%end
+%for ih=1:62
+%    set(c(:,ih),'LineWidth',1.5); % Set the line width of the Box outlines here
+%end
+set(gca,'ycolor',Colors(2,:)) 
 set(findobj(gcf,'LineStyle','--'),'LineStyle','-')
-xticks([0 1 2 3 4 5]);
-xticklabels([0 1 2 3 4 5]);
+xticks([0 1 2 3 4 5 6 7 8 9 10]);
+xticklabels([0 1 2 3 4 5 6 7 8 9 10]);
 %hold on;
 %plot(K_coupling,fullOrderVecMean);
 text(0.25,0.9,'I','FontSize',20,'FontName','Serif','color',txtcol);
-xline(0.42,'LineWidth',1.5,'Color',txtcol);
-text(1.05,0.9,'II','FontSize',20,'FontName','Serif','color',txtcol);
-xline(1.75,'LineWidth',1.5,'Color',txtcol);
-text(3.5,0.4,'III','FontSize',20,'FontName','Serif','color',txtcol);
+xline(0.75,'LineWidth',1.5,'Color',txtcol);
+text(1.8,0.9,'II','FontSize',20,'FontName','Serif','color',txtcol);
+xline(2.75,'LineWidth',1.5,'Color',txtcol);
+text(7.5,0.4,'III','FontSize',20,'FontName','Serif','color',txtcol);
 %xline(4.25,'LineWidth',1,'Color','k');
 %text(4.55,0.4,'IV','FontSize',20,'FontName','Serif');
 ylim([0 1]);
-xlim([0 5]);
+xlim([0 10]);
 xlabel("Coupling Constant",'color',txtcol);
 ylabel("Order Parameter",'color',txtcol);
 %title("Order vs Coupling Strength");
 %xline(1.4,'LineWidth',1,'Color','k');
 %text(4.3, 0.75, 'sin(x)');
-text(2.9, 0.18, 'o', 'Color', Colors(1,:));
-text(2.9, 0.13, 'o', 'Color', Colors(2,:));
-text(2.9, 0.08, 'o', 'Color', Colors(3,:));
-text(3.05,0.177,'Full Model','Color',txtcol);
-text(3.05,0.127,'Low Synchronization Kuramoto','color',txtcol);
-text(3.05,0.077,'High Synchronization Kuramoto','color',txtcol);
+text(5.9, 0.18, 'o', 'Color', Colors(1,:));
+text(5.9, 0.13, 'o', 'Color', Colors(2,:));
+text(5.9, 0.08, 'o', 'Color', Colors(3,:));
+text(6.05,0.177,'Full Model','Color',txtcol);
+text(6.05,0.127,'Low Synchronization Kuramoto','color',txtcol);
+text(6.05,0.077,'High Synchronization Kuramoto','color',txtcol);
 ax = gca
-set(gca, 'FontSize', 14);
+set(gca, 'FontSize', fontsize);
 set(ax, {'XColor', 'YColor'}, {txtcol, txtcol});
-set(gca,'Color','None');
-set(gcf,'Color','None');
+set(gca,'Color',bkgdcol);
+set(gcf,'Color',bkgdcol);
 hold off;
 
 figure(2);
 histogram(Internal_freq_vec_low,'facecolor',Colors(2,:),'facealpha',1);
 ax = gca
 set(ax, {'XColor', 'YColor'}, {txtcol, txtcol});
-set(gca,'Color','None');
-set(gcf,'Color','None');
-set(gca, 'FontSize', 24);
+set(gca,'Color',bkgdcol);
+set(gcf,'Color',bkgdcol);
+set(gca, 'FontSize', fontsize);
 xlabel("Resource-Modified Internal Frequency",'color',txtcol);
 ylabel("Number of Oscillators",'color',txtcol);
 
@@ -97,11 +101,39 @@ figure(3);
 histogram(Internal_freq_vec_high,'facecolor',Colors(3,:),'facealpha',1);
 ax = gca
 set(ax, {'XColor', 'YColor'}, {txtcol, txtcol});
-set(gca,'Color','None');
-set(gcf,'Color','None');
-set(gca, 'FontSize', 24);
+set(gca,'Color',bkgdcol);
+set(gcf,'Color',bkgdcol);
+set(gca, 'FontSize', fontsize);
 xlabel("Resource-Modified Internal Frequency",'color',txtcol);
 ylabel("Number of Oscillators",'color',txtcol);
+
+%{
+figure(4);
+O2_mean_vs_t = squeeze(mean(O2_vec_full,2));
+plot(O2_mean_vs_t(6,1000:end),order_param_full(6,1000:end));
+ax = gca
+set(ax, {'XColor', 'YColor'}, {txtcol, txtcol});
+set(gca,'Color',bkgdcol);
+set(gcf,'Color',bkgdcol);
+set(gca, 'FontSize', fontsize);
+xlabel("Mean Oxygen Level",'color',txtcol);
+ylabel("Order Parameter",'color',txtcol);
+scatter(O2_mean_vs_t(7,1000),order_param_full(7,1000));
+hold on;
+figure(5);
+hold on;
+for i=500:(floor(size(O2_mean_vs_t,2)/2))
+    figure(4);
+    scatter(O2_mean_vs_t(6,4*i),order_param_full(6,4*i));
+    figure(5);
+    scatter(4*i,order_param_full(6,4*i));
+    pause(0.001);
+end
+figure(4);
+hold off;
+figure(5);
+hold off;
+%}
 %{
 figure(2);
 scatter(K_coupling,O2_var_full,'o','MarkerEdgeColor',[0 0.4 0]);

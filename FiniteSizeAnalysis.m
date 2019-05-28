@@ -17,7 +17,13 @@ for b=1:size(Beta,2)
     end
 end
 
-txtcol = [1 216/255 95/255];
+Colors = [0.8 0.2 0; 0 0.2 0.8; 0.2 0.6 0.2];
+%Colors = [1 1 0.4; 1 0.5 0.6; 200/256 26/256 54/256];
+%txtcol = [1 216/255 95/255];
+txtcol = [0 0 0];
+bkgdcol = [1 1 1];
+txtsize = 14;
+%txtcol = [1 216/255 95/255];
 figure(1);
 scatter(N,var_vec_avg(:,1),30,txtcol,'filled');
 xlabel("Number of neurons");
@@ -27,9 +33,9 @@ title("Kuramoto Model",'color',txtcol);
 ylim([0,0.05]);
 ax = gca
 set(ax, {'XColor', 'YColor'}, {txtcol, txtcol});
-set(gca,'Color','None');
-set(gcf,'Color','None');
-set(gca, 'FontSize', 24);
+set(gca,'Color',bkgdcol);
+set(gcf,'Color',bkgdcol);
+set(gca, 'FontSize', txtsize);
 
 figure(2);
 scatter(N,var_vec_avg(:,2),30,txtcol,'filled');
@@ -40,6 +46,6 @@ title("Full Model",'color',txtcol);
 ylim([0,0.05]);
 ax = gca
 set(ax, {'XColor', 'YColor'}, {txtcol, txtcol});
-set(gca,'Color','None');
-set(gcf,'Color','None');
-set(gca, 'FontSize', 24);
+set(gca,'Color',bkgdcol);
+set(gcf,'Color',bkgdcol);
+set(gca, 'FontSize', txtsize);
